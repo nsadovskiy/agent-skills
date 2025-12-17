@@ -1,0 +1,33 @@
+# HTTP REST/JSON Service Layout (Echo)
+
+Use this when you want Echo (`github.com/labstack/echo/v4`) as the HTTP server/router.
+
+## Directory tree (relative to base layout)
+
+```text
+cmd/
+  <service>-api/
+    main.go                 # Starts echo, graceful shutdown
+internal/<service>/
+  adapter/in/http/
+    server.go               # Echo routes + DTO mapping; depends on port/in
+  bootstrap/
+    http.go                 # NewEcho(): wires ports and adapters
+api/openapi/
+  <service>.yaml            # Optional but recommended
+```
+
+## Hexagonal boundaries (Echo-specific reminders)
+
+- Keep Echo handlers thin: parse/validate request, call `port/in`, map response.
+- Do not let Echo types leak into `app`/`domain`/`port/*`.
+- Put middleware under `internal/<service>/adapter/in/http/middleware` if it grows.
+- Expose `GET /health/live` and `GET /health/ready` for liveness/readiness.
+
+## Scaffolding
+
+Use the scaffolder with:
+
+`python3 scripts/scaffold_hex_service.py --root <repo> --service <name> --kinds http` (Echo is the default; module defaults to folder name for new projects)
+
+If `go.mod` is created (new project), the scaffolder runs `go mod tidy` to fetch dependencies (Echo + Logrus). Use `--skip-deps` to skip.
