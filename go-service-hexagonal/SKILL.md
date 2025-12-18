@@ -46,6 +46,13 @@ For a pure `net/http` baseline:
 
 HTTP scaffolds include `GET /health/live` and `GET /health/ready`, plus request logging using Logrus (`github.com/sirupsen/logrus`).
 
+Optional (opt-in) HTTP debug endpoints:
+
+- `--http-pprof` adds handlers under `GET /debug/pprof/*` (pprof index + profiles).
+- `--http-trace` adds `GET /debug/pprof/trace` (execution trace).
+- These run on a separate debug HTTP server and are activated only when `PPROF_PORT` is set (e.g. `PPROF_PORT=6060`); optionally set `PPROF_ADDR` to change the bind address (default `127.0.0.1`).
+- The handler mux is scaffolded as a dedicated inbound adapter: `internal/<service>/adapter/in/debughttp`.
+
 For new projects, if `--module` is omitted the module path defaults to the `<repo>` folder name (no `github.com/...` assumption).
 If `go.mod` is created (new project), the scaffolder runs `go mod tidy` to fetch dependencies (Echo + Logrus). Use `--skip-deps` to skip.
 

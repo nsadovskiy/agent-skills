@@ -11,6 +11,7 @@ cmd/
 internal/<service>/
   adapter/in/http/
     server.go               # Echo routes + DTO mapping; depends on port/in
+  adapter/in/debughttp/      # Optional: pprof/trace handler mux (served on separate debug server)
   bootstrap/
     http.go                 # NewEcho(): wires ports and adapters
 api/openapi/
@@ -23,6 +24,7 @@ api/openapi/
 - Do not let Echo types leak into `app`/`domain`/`port/*`.
 - Put middleware under `internal/<service>/adapter/in/http/middleware` if it grows.
 - Expose `GET /health/live` and `GET /health/ready` for liveness/readiness.
+- Add profiling endpoints only when needed (opt-in) and serve them from a separate debug server (set `PPROF_PORT`, optional `PPROF_ADDR`).
 
 ## Scaffolding
 
@@ -31,3 +33,9 @@ Use the scaffolder with:
 `python3 scripts/scaffold_hex_service.py --root <repo> --service <name> --kinds http` (Echo is the default; module defaults to folder name for new projects)
 
 If `go.mod` is created (new project), the scaffolder runs `go mod tidy` to fetch dependencies (Echo + Logrus). Use `--skip-deps` to skip.
+
+Optional debug endpoints:
+
+- Add pprof: append `--http-pprof`
+- Add trace: append `--http-trace`
+- Enable the debug server: set `PPROF_PORT` (and optional `PPROF_ADDR`, default `127.0.0.1`)

@@ -18,6 +18,8 @@ class Options:
     service: str
     kinds: tuple[str, ...]
     http_framework: str
+    http_pprof: bool
+    http_trace: bool
     skip_deps: bool
 
 
@@ -127,6 +129,18 @@ def _write_project_docs(opt: Options) -> None:
             binaries.append(f"- `cmd/{opt.service}-cli`: CLI")
 
     binaries_block = "\n".join(binaries) if binaries else "- (none scaffolded)"
+    debug_section = ""
+    env_pprof = ""
+    if "http" in opt.kinds and (opt.http_pprof or opt.http_trace):
+        debug_section = """
+## Debug endpoints (optional)
+
+When scaffolded with `--http-pprof` and/or `--http-trace`, these are served by a separate debug HTTP server when `PPROF_PORT` is set:
+
+- `GET http://$PPROF_ADDR:$PPROF_PORT/debug/pprof/` (pprof index)
+- `GET http://$PPROF_ADDR:$PPROF_PORT/debug/pprof/trace` (execution trace)
+"""
+        env_pprof = "\n- `PPROF_ADDR` (optional; default `127.0.0.1`)\n- `PPROF_PORT` (optional; enables debug server on `$PPROF_ADDR:<port>`)"
 
     _write_if_missing(
         opt.root / "README.md",
@@ -142,6 +156,7 @@ Go service scaffold using hexagonal (ports-and-adapters) architecture.
 
 - `GET /health/live`
 - `GET /health/ready`
+{debug_section}
 
 ## Local run (HTTP)
 
@@ -152,7 +167,7 @@ go run ./cmd/{opt.service}-api
 Environment:
 
 - `HTTP_ADDR` (default `:8080`)
-- `LOG_LEVEL` (e.g. `info`, `debug`)
+- `LOG_LEVEL` (e.g. `info`, `debug`){env_pprof}
 """,
     )
 
@@ -225,11 +240,12 @@ The scaffolder creates only what you asked for, but these are the standard direc
 
 ## HTTP (when present)
 
-- Expose only health endpoints by default:
+- Always expose health endpoints:
   - `GET /health/live`
   - `GET /health/ready`
 - Keep health handlers fast and dependency-light.
 - Request logging must be enabled (Logrus-backed).
+- Add profiling/debug endpoints only when needed (opt-in) and keep them on a separate debug server (set `PPROF_PORT`, optional `PPROF_ADDR`).
 
 ## Logging
 
@@ -291,6 +307,11 @@ def _write_bootstrap_compose(opt: Options) -> None:
         raise SystemExit("Go module path not set; pass --module or run inside an existing module (go.mod).")
 
     if "http" in opt.kinds and opt.http_framework == "echo":
+        debug_import = ""
+        debug_field = ""
+        if opt.http_pprof or opt.http_trace:
+            debug_import = '\n\tdebughttp "REPLACE_MODULE/internal/REPLACE_SERVICE/adapter/in/debughttp"'
+            debug_field = f"\n\t\tDebugHTTPHandler: debughttp.Handler(debughttp.Options{{Pprof: {str(opt.http_pprof).lower()}, Trace: {str(opt.http_trace).lower()}}}),"
         _write(
             _svc(opt.root, opt.service) / "bootstrap" / "compose.go",
             """package bootstrap
@@ -303,6 +324,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	httpadapter "REPLACE_MODULE/internal/REPLACE_SERVICE/adapter/in/http"
+REPLACE_DEBUG_IMPORT
 )
 
 // Root is the single composition root for dependency injection.
@@ -311,6 +333,7 @@ type Root struct {
 	Logger     *logrus.Logger
 	HTTPServer *echo.Echo
 	HTTPHandler http.Handler
+	DebugHTTPHandler http.Handler
 }
 
 func Compose() *Root {
@@ -320,6 +343,7 @@ func Compose() *Root {
 		Logger:     logger,
 		HTTPServer: srv,
 		HTTPHandler: srv,
+REPLACE_DEBUG_FIELD
 	}
 }
 
@@ -332,11 +356,19 @@ func newLogger() *logrus.Logger {
 	}
 	return l
 }
-""".replace("REPLACE_SERVICE", opt.service),
+"""
+            .replace("REPLACE_DEBUG_IMPORT", debug_import)
+            .replace("REPLACE_DEBUG_FIELD", debug_field)
+            .replace("REPLACE_SERVICE", opt.service),
         )
         return
 
     if "http" in opt.kinds and opt.http_framework == "nethttp":
+        debug_import = ""
+        debug_field = ""
+        if opt.http_pprof or opt.http_trace:
+            debug_import = '\n\tdebughttp "REPLACE_MODULE/internal/REPLACE_SERVICE/adapter/in/debughttp"'
+            debug_field = f"\n\t\tDebugHTTPHandler: debughttp.Handler(debughttp.Options{{Pprof: {str(opt.http_pprof).lower()}, Trace: {str(opt.http_trace).lower()}}}),"
         _write(
             _svc(opt.root, opt.service) / "bootstrap" / "compose.go",
             """package bootstrap
@@ -348,6 +380,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	httpadapter "REPLACE_MODULE/internal/REPLACE_SERVICE/adapter/in/http"
+REPLACE_DEBUG_IMPORT
 )
 
 // Root is the single composition root for dependency injection.
@@ -355,6 +388,7 @@ import (
 type Root struct {
 	Logger     *logrus.Logger
 	HTTPHandler http.Handler
+	DebugHTTPHandler http.Handler
 }
 
 func Compose() *Root {
@@ -362,6 +396,7 @@ func Compose() *Root {
 	return &Root{
 		Logger:      logger,
 		HTTPHandler: httpadapter.Router{Logger: logger}.Handler(),
+REPLACE_DEBUG_FIELD
 	}
 }
 
@@ -374,7 +409,10 @@ func newLogger() *logrus.Logger {
 	}
 	return l
 }
-""".replace("REPLACE_SERVICE", opt.service),
+"""
+            .replace("REPLACE_DEBUG_IMPORT", debug_import)
+            .replace("REPLACE_DEBUG_FIELD", debug_field)
+            .replace("REPLACE_SERVICE", opt.service),
         )
         return
 
@@ -410,12 +448,49 @@ func newLogger() *logrus.Logger {
     )
 
 
+def _write_http_debug_pprof(opt: Options) -> None:
+    if opt.module is None:
+        return
+    _write(
+        _svc(opt.root, opt.service) / "adapter" / "in" / "debughttp" / "pprof.go",
+        """package debughttp
+
+import (
+	"net/http"
+	"net/http/pprof"
+)
+
+type Options struct {
+	Pprof bool
+	Trace bool
+}
+
+func Handler(opt Options) http.Handler {
+	mux := http.NewServeMux()
+	if opt.Pprof {
+		mux.HandleFunc("/debug/pprof/", pprof.Index)
+		mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+		mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	}
+	if opt.Trace {
+		mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	}
+	return mux
+}
+""",
+    )
+
+
 def _scaffold_http_nethttp(opt: Options) -> None:
     if opt.module is None:
         raise SystemExit("--module is required when scaffolding --kinds http (Go imports need a module path).")
     (opt.root / "cmd" / f"{opt.service}-api").mkdir(parents=True, exist_ok=True)
     (_svc(opt.root, opt.service) / "adapter" / "in" / "http").mkdir(parents=True, exist_ok=True)
     (_svc(opt.root, opt.service) / "adapter" / "in" / "http" / "middleware").mkdir(parents=True, exist_ok=True)
+    if opt.http_pprof or opt.http_trace:
+        (_svc(opt.root, opt.service) / "adapter" / "in" / "debughttp").mkdir(parents=True, exist_ok=True)
+        _write_http_debug_pprof(opt)
 
     _write(
         _svc(opt.root, opt.service) / "adapter" / "in" / "http" / "router.go",
@@ -439,7 +514,8 @@ func (r Router) Handler() http.Handler {
 	mux.HandleFunc("/health/ready", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	return middleware.RequestLogger(r.Logger, mux)
 }
-""".replace("REPLACE_SERVICE", opt.service),
+"""
+        .replace("REPLACE_SERVICE", opt.service),
     )
     _write(
         _svc(opt.root, opt.service) / "adapter" / "in" / "http" / "middleware" / "logging.go",
@@ -491,9 +567,7 @@ func RequestLogger(logger logrus.FieldLogger, next http.Handler) http.Handler {
 }
 """,
     )
-    _write(
-        opt.root / "cmd" / f"{opt.service}-api" / "main.go",
-        """package main
+    main_go = """package main
 
 import (
 	"context"
@@ -541,7 +615,100 @@ func envOr(key, fallback string) string {
 	}
 	return fallback
 }
-""".replace("REPLACE_SERVICE", opt.service),
+"""
+
+    if opt.http_pprof or opt.http_trace:
+        main_go = """package main
+
+import (
+	"context"
+	"net"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/sirupsen/logrus"
+
+	"REPLACE_MODULE/internal/REPLACE_SERVICE/bootstrap"
+)
+
+func main() {
+	root := bootstrap.Compose()
+	logger := root.Logger
+	addr := envOr("HTTP_ADDR", ":8080")
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           root.HTTPHandler,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	debugSrv := debugServer(logger, root.DebugHTTPHandler)
+
+	go func() {
+		logger.WithField("addr", addr).Info("http_listen")
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.WithError(err).Fatal("http_server_error")
+		}
+	}()
+
+	<-shutdownSignal()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if debugSrv != nil {
+		_ = debugSrv.Shutdown(ctx)
+	}
+	_ = srv.Shutdown(ctx)
+}
+
+func debugServer(logger *logrus.Logger, handler http.Handler) *http.Server {
+	if handler == nil {
+		return nil
+	}
+	host := os.Getenv("PPROF_ADDR")
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	port := os.Getenv("PPROF_PORT")
+	if port == "" {
+		return nil
+	}
+	if logger == nil {
+		logger = logrus.StandardLogger()
+	}
+	addr := net.JoinHostPort(host, port)
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	go func() {
+		logger.WithField("addr", addr).Info("debug_http_listen")
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.WithError(err).Error("debug_http_server_error")
+		}
+	}()
+	return srv
+}
+
+func shutdownSignal() <-chan os.Signal {
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
+	return ch
+}
+
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+"""
+
+    _write(
+        opt.root / "cmd" / f"{opt.service}-api" / "main.go",
+        main_go.replace("REPLACE_SERVICE", opt.service),
     )
     _write_health_tests(opt)
 
@@ -551,6 +718,9 @@ def _scaffold_http_echo(opt: Options) -> None:
         raise SystemExit("--module is required when scaffolding --kinds http (Go imports need a module path).")
     (opt.root / "cmd" / f"{opt.service}-api").mkdir(parents=True, exist_ok=True)
     (_svc(opt.root, opt.service) / "adapter" / "in" / "http").mkdir(parents=True, exist_ok=True)
+    if opt.http_pprof or opt.http_trace:
+        (_svc(opt.root, opt.service) / "adapter" / "in" / "debughttp").mkdir(parents=True, exist_ok=True)
+        _write_http_debug_pprof(opt)
 
     _write(
         _svc(opt.root, opt.service) / "adapter" / "in" / "http" / "server.go",
@@ -602,12 +772,11 @@ func New(logger *logrus.Logger) *echo.Echo {
 
 	return e
 }
-""".replace("REPLACE_SERVICE", opt.service),
+"""
+        .replace("REPLACE_SERVICE", opt.service),
     )
 
-    _write(
-        opt.root / "cmd" / f"{opt.service}-api" / "main.go",
-        """package main
+    main_go = """package main
 
 import (
 	"context"
@@ -651,7 +820,96 @@ func envOr(key, fallback string) string {
 	}
 	return fallback
 }
-""".replace("REPLACE_SERVICE", opt.service),
+"""
+
+    if opt.http_pprof or opt.http_trace:
+        main_go = """package main
+
+import (
+	"context"
+	"net"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/sirupsen/logrus"
+
+	"REPLACE_MODULE/internal/REPLACE_SERVICE/bootstrap"
+)
+
+func main() {
+	addr := envOr(\"HTTP_ADDR\", \":8080\")
+	root := bootstrap.Compose()
+	logger := root.Logger
+	e := root.HTTPServer
+
+	debugSrv := debugServer(logger, root.DebugHTTPHandler)
+
+	go func() {
+		logger.WithField("addr", addr).Info("http_listen")
+		if err := e.Start(addr); err != nil && err != http.ErrServerClosed {
+			logger.WithError(err).Fatal("http_server_error")
+		}
+	}()
+
+	<-shutdownSignal()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if debugSrv != nil {
+		_ = debugSrv.Shutdown(ctx)
+	}
+	_ = e.Shutdown(ctx)
+}
+
+func debugServer(logger *logrus.Logger, handler http.Handler) *http.Server {
+	if handler == nil {
+		return nil
+	}
+	host := os.Getenv("PPROF_ADDR")
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	port := os.Getenv("PPROF_PORT")
+	if port == "" {
+		return nil
+	}
+	if logger == nil {
+		logger = logrus.StandardLogger()
+	}
+	addr := net.JoinHostPort(host, port)
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	go func() {
+		logger.WithField("addr", addr).Info("debug_http_listen")
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.WithError(err).Error("debug_http_server_error")
+		}
+	}()
+	return srv
+}
+
+func shutdownSignal() <-chan os.Signal {
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
+	return ch
+}
+
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != \"\" {
+		return v
+	}
+	return fallback
+}
+"""
+
+    _write(
+        opt.root / "cmd" / f"{opt.service}-api" / "main.go",
+        main_go.replace("REPLACE_SERVICE", opt.service),
     )
     _write_health_tests(opt)
 
@@ -751,6 +1009,16 @@ def parse_args() -> Options:
         help="HTTP framework for --kinds http: echo (default) or nethttp.",
     )
     parser.add_argument(
+        "--http-pprof",
+        action="store_true",
+        help="Include HTTP debug handlers for pprof on /debug/pprof/* (opt-in; only for --kinds http).",
+    )
+    parser.add_argument(
+        "--http-trace",
+        action="store_true",
+        help="Include HTTP debug handler for trace on /debug/pprof/trace (opt-in; only for --kinds http).",
+    )
+    parser.add_argument(
         "--skip-deps",
         action="store_true",
         help="Skip dependency install (do not run `go mod tidy` even if go.mod is created).",
@@ -766,6 +1034,8 @@ def parse_args() -> Options:
         service=args.service,
         kinds=kinds,
         http_framework=args.http_framework,
+        http_pprof=args.http_pprof,
+        http_trace=args.http_trace,
         skip_deps=args.skip_deps,
     )
 
