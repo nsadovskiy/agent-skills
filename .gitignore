@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+.pytest_cache/
+
+# Virtualenvs
+.venv/
+venv/
+env/
+
+# Editor/OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local scratch/output
+tmp*/
+tmp_*/
+.tmp*/
+.tmp_*/
+
+# Go caches (may appear in generated scaffolds)
+.gocache/
+.gomodcache/
