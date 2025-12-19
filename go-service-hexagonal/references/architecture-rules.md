@@ -14,7 +14,7 @@ Use this as a checklist when reviewing or proposing a directory structure.
 
 ## Single composition root
 
-- Centralize DI in `internal/bootstrap.Compose()` (one place to construct and inject dependencies).
+- Centralize DI in `internal/bootstrap.Compose(settingsRepo)` (one place to construct and inject dependencies).
 
 ## Keep interfaces at the boundary
 

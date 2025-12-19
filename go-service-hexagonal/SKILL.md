@@ -26,7 +26,7 @@ description: Define, review, and scaffold Go service directory structures using 
 - Put **use cases** in `internal/app` and define **inbound ports** in `internal/port/in`.
 - Define **outbound ports** (interfaces to DB, queues, HTTP clients) in `internal/port/out`.
 - Implement adapters in `internal/adapter/in` (primary) and `internal/adapter/out` (secondary).
-- Perform all wiring in a single composition root: `internal/bootstrap.Compose()` and keep `cmd/*` thin.
+- Perform all wiring in a single composition root: `internal/bootstrap.Compose(settingsRepo)` and keep `cmd/*` thin.
 
 Use `references/architecture-rules.md` as the dependency rulebook.
 

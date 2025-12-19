@@ -89,6 +89,8 @@ def _base_tree(opt: Options) -> None:
         "internal/port/out",
         "internal/adapter/in",
         "internal/adapter/out",
+        "internal/adapter/out/env",
+        "internal/app/settings",
         "internal/bootstrap",
     ]
     if "grpc" in opt.kinds:
@@ -101,7 +103,100 @@ def _base_tree(opt: Options) -> None:
 
     _write_project_docs(opt)
 
+    _write_settings_port(opt)
+    _write_env_adapter(opt)
+    _write_settings_repo(opt)
+
     _write_bootstrap_compose(opt)
+
+
+def _write_settings_port(opt: Options) -> None:
+    _write(
+        _svc(opt.root) / "port" / "out" / "settings.go",
+        """package out
+
+type Settings struct {
+	HTTPAddr  string
+	PprofAddr string
+	PprofPort string
+	LogLevel  string
+}
+
+type SettingsReader interface {
+	Load() Settings
+}
+
+type SettingsRepository interface {
+	Get() Settings
+	Reload() Settings
+}
+""",
+    )
+
+
+def _write_env_adapter(opt: Options) -> None:
+    _write(
+        _svc(opt.root) / "adapter" / "out" / "env" / "env.go",
+        """package env
+
+import (
+	"os"
+
+	portout "REPLACE_MODULE/internal/port/out"
+)
+
+type Reader struct{}
+
+func (Reader) Load() portout.Settings {
+	return portout.Settings{
+		HTTPAddr:  stringOr("HTTP_ADDR", ":8080"),
+		PprofAddr: stringOr("PPROF_ADDR", "127.0.0.1"),
+		PprofPort: os.Getenv("PPROF_PORT"),
+		LogLevel:  os.Getenv("LOG_LEVEL"),
+	}
+}
+
+func stringOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+""",
+    )
+
+
+def _write_settings_repo(opt: Options) -> None:
+    _write(
+        _svc(opt.root) / "app" / "settings" / "repository.go",
+        """package settings
+
+import portout "REPLACE_MODULE/internal/port/out"
+
+type Repository struct {
+	reader   portout.SettingsReader
+	settings portout.Settings
+}
+
+func NewRepository(reader portout.SettingsReader) *Repository {
+	repo := &Repository{reader: reader}
+	repo.Reload()
+	return repo
+}
+
+func (r *Repository) Get() portout.Settings {
+	return r.settings
+}
+
+func (r *Repository) Reload() portout.Settings {
+	if r.reader == nil {
+		return r.settings
+	}
+	r.settings = r.reader.Load()
+	return r.settings
+}
+""",
+    )
 
 
 def _write_project_docs(opt: Options) -> None:
@@ -174,8 +269,8 @@ This repository follows Go best practices and hexagonal (ports-and-adapters / â€
 - `internal/port/in` and `internal/port/out` define interfaces at the boundaries.
 - `internal/adapter/in/*` depends on `port/in` (+ domain types for mapping).
 - `internal/adapter/out/*` depends on `port/out` (+ domain types for mapping).
-- **All wiring happens only in the composition root**: `internal/bootstrap/compose.go` (`bootstrap.Compose()`).
-- `cmd/*` is a thin entrypoint: read env/config, call `bootstrap.Compose()`, start servers/loops, handle shutdown.
+- **All wiring happens only in the composition root**: `internal/bootstrap/compose.go` (`bootstrap.Compose(settingsRepo)`).
+- `cmd/*` is a thin entrypoint: call `bootstrap.ComposeFromEnv()` (or build a settings repo and call `bootstrap.Compose(settingsRepo)`), start servers/loops, handle shutdown.
 
 **Design guidance:**
 
@@ -222,7 +317,8 @@ The scaffolder creates only what you asked for, but these are the standard direc
 ## Composition root (DI)
 
 - Put **all construction/injection** in `internal/bootstrap/compose.go`.
-- `bootstrap.Compose()` returns a `Root` struct that holds initialized dependencies (logger, servers, clients, repos).
+- Load env settings via `internal/adapter/out/env`, store them in a settings repo, and pass the repo into `bootstrap.Compose(settingsRepo)` (or use `bootstrap.ComposeFromEnv()`).
+- `bootstrap.Compose(settingsRepo)` returns a `Root` struct that holds initialized dependencies (logger, servers, clients, repos).
 - Adapters should be constructed with explicit dependencies (interfaces), not by reaching into globals.
 
 ## HTTP (when present)
@@ -243,7 +339,7 @@ The scaffolder creates only what you asked for, but these are the standard direc
 ## Testing
 
 - Run `go test ./...` before finishing changes.
-- Use `test/` (package `test`) for integration-style tests that exercise the composed app via `bootstrap.Compose()`.
+- Use `test/` (package `test`) for integration-style tests that exercise the composed app via `bootstrap.ComposeFromEnv()`.
 - Keep most unit tests next to packages in `internal/...` as `*_test.go`.
 
 ## Go hygiene
@@ -310,6 +406,9 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/sirupsen/logrus"
 
+	envadapter "REPLACE_MODULE/internal/adapter/out/env"
+	portout "REPLACE_MODULE/internal/port/out"
+	settingsrepo "REPLACE_MODULE/internal/app/settings"
 	httpadapter "REPLACE_MODULE/internal/adapter/in/http"
 REPLACE_DEBUG_IMPORT
 )
@@ -318,28 +417,43 @@ REPLACE_DEBUG_IMPORT
 // Add databases/clients/etc here and wire them into adapters/use-cases.
 type Root struct {
 	Logger     *logrus.Logger
+	Settings   portout.Settings
+	SettingsRepo portout.SettingsRepository
 	HTTPServer *echo.Echo
 	HTTPHandler http.Handler
 	DebugHTTPHandler http.Handler
 }
 
-func Compose() *Root {
-	logger := newLogger()
+func Compose(settingsRepo portout.SettingsRepository) *Root {
+	settings := portout.Settings{}
+	if settingsRepo != nil {
+		settings = settingsRepo.Get()
+	}
+	logger := newLogger(settings.LogLevel)
 	srv := httpadapter.New(logger)
 	return &Root{
 		Logger:     logger,
+		Settings:   settings,
+		SettingsRepo: settingsRepo,
 		HTTPServer: srv,
 		HTTPHandler: srv,
 REPLACE_DEBUG_FIELD
 	}
 }
 
-func newLogger() *logrus.Logger {
+func ComposeFromEnv() *Root {
+	settingsRepo := settingsrepo.NewRepository(envadapter.Reader{})
+	return Compose(settingsRepo)
+}
+
+func newLogger(logLevel string) *logrus.Logger {
 	l := logrus.New()
 	l.SetOutput(os.Stdout)
 	l.SetFormatter(&logrus.JSONFormatter{})
-	if lvl, err := logrus.ParseLevel(os.Getenv("LOG_LEVEL")); err == nil {
-		l.SetLevel(lvl)
+	if logLevel != "" {
+		if parsed, err := logrus.ParseLevel(logLevel); err == nil {
+			l.SetLevel(parsed)
+		}
 	}
 	return l
 }
@@ -365,6 +479,9 @@ import (
 
 	"github.com/sirupsen/logrus"
 
+	envadapter "REPLACE_MODULE/internal/adapter/out/env"
+	portout "REPLACE_MODULE/internal/port/out"
+	settingsrepo "REPLACE_MODULE/internal/app/settings"
 	httpadapter "REPLACE_MODULE/internal/adapter/in/http"
 REPLACE_DEBUG_IMPORT
 )
@@ -373,25 +490,40 @@ REPLACE_DEBUG_IMPORT
 // Add databases/clients/etc here and wire them into adapters/use-cases.
 type Root struct {
 	Logger     *logrus.Logger
+	Settings   portout.Settings
+	SettingsRepo portout.SettingsRepository
 	HTTPHandler http.Handler
 	DebugHTTPHandler http.Handler
 }
 
-func Compose() *Root {
-	logger := newLogger()
+func Compose(settingsRepo portout.SettingsRepository) *Root {
+	settings := portout.Settings{}
+	if settingsRepo != nil {
+		settings = settingsRepo.Get()
+	}
+	logger := newLogger(settings.LogLevel)
 	return &Root{
 		Logger:      logger,
+		Settings:    settings,
+		SettingsRepo: settingsRepo,
 		HTTPHandler: httpadapter.Router{Logger: logger}.Handler(),
 REPLACE_DEBUG_FIELD
 	}
 }
 
-func newLogger() *logrus.Logger {
+func ComposeFromEnv() *Root {
+	settingsRepo := settingsrepo.NewRepository(envadapter.Reader{})
+	return Compose(settingsRepo)
+}
+
+func newLogger(logLevel string) *logrus.Logger {
 	l := logrus.New()
 	l.SetOutput(os.Stdout)
 	l.SetFormatter(&logrus.JSONFormatter{})
-	if lvl, err := logrus.ParseLevel(os.Getenv("LOG_LEVEL")); err == nil {
-		l.SetLevel(lvl)
+	if logLevel != "" {
+		if parsed, err := logrus.ParseLevel(logLevel); err == nil {
+			l.SetLevel(parsed)
+		}
 	}
 	return l
 }
@@ -409,23 +541,44 @@ import (
 	"os"
 
 	"github.com/sirupsen/logrus"
+
+	envadapter "REPLACE_MODULE/internal/adapter/out/env"
+	portout "REPLACE_MODULE/internal/port/out"
+	settingsrepo "REPLACE_MODULE/internal/app/settings"
 )
 
 // Root is the single composition root for dependency injection.
 type Root struct {
 	Logger *logrus.Logger
+	Settings   portout.Settings
+	SettingsRepo portout.SettingsRepository
 }
 
-func Compose() *Root {
-	return &Root{Logger: newLogger()}
+func Compose(settingsRepo portout.SettingsRepository) *Root {
+	settings := portout.Settings{}
+	if settingsRepo != nil {
+		settings = settingsRepo.Get()
+	}
+	return &Root{
+		Logger:       newLogger(settings.LogLevel),
+		Settings:     settings,
+		SettingsRepo: settingsRepo,
+	}
 }
 
-func newLogger() *logrus.Logger {
+func ComposeFromEnv() *Root {
+	settingsRepo := settingsrepo.NewRepository(envadapter.Reader{})
+	return Compose(settingsRepo)
+}
+
+func newLogger(logLevel string) *logrus.Logger {
 	l := logrus.New()
 	l.SetOutput(os.Stdout)
 	l.SetFormatter(&logrus.JSONFormatter{})
-	if lvl, err := logrus.ParseLevel(os.Getenv("LOG_LEVEL")); err == nil {
-		l.SetLevel(lvl)
+	if logLevel != "" {
+		if parsed, err := logrus.ParseLevel(logLevel); err == nil {
+			l.SetLevel(parsed)
+		}
 	}
 	return l
 }
@@ -565,9 +718,9 @@ import (
 )
 
 func main() {
-	root := bootstrap.Compose()
+	root := bootstrap.ComposeFromEnv()
 	logger := root.Logger
-	addr := envOr("HTTP_ADDR", ":8080")
+	addr := root.Settings.HTTPAddr
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           root.HTTPHandler,
@@ -592,13 +745,6 @@ func shutdownSignal() <-chan os.Signal {
 	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
 	return ch
 }
-
-func envOr(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
-}
 """
 
     if opt.http_pprof or opt.http_trace:
@@ -619,16 +765,16 @@ import (
 )
 
 func main() {
-	root := bootstrap.Compose()
+	root := bootstrap.ComposeFromEnv()
 	logger := root.Logger
-	addr := envOr("HTTP_ADDR", ":8080")
+	addr := root.Settings.HTTPAddr
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           root.HTTPHandler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	debugSrv := debugServer(logger, root.DebugHTTPHandler)
+	debugSrv := debugServer(logger, root.Settings.PprofAddr, root.Settings.PprofPort, root.DebugHTTPHandler)
 
 	go func() {
 		logger.WithField("addr", addr).Info("http_listen")
@@ -646,15 +792,10 @@ func main() {
 	_ = srv.Shutdown(ctx)
 }
 
-func debugServer(logger *logrus.Logger, handler http.Handler) *http.Server {
+func debugServer(logger *logrus.Logger, host string, port string, handler http.Handler) *http.Server {
 	if handler == nil {
 		return nil
 	}
-	host := os.Getenv("PPROF_ADDR")
-	if host == "" {
-		host = "127.0.0.1"
-	}
-	port := os.Getenv("PPROF_PORT")
 	if port == "" {
 		return nil
 	}
@@ -680,13 +821,6 @@ func shutdownSignal() <-chan os.Signal {
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
 	return ch
-}
-
-func envOr(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
 }
 """
 
@@ -773,9 +907,9 @@ import (
 )
 
 func main() {
-	addr := envOr(\"HTTP_ADDR\", \":8080\")
-	root := bootstrap.Compose()
+	root := bootstrap.ComposeFromEnv()
 	logger := root.Logger
+	addr := root.Settings.HTTPAddr
 	e := root.HTTPServer
 
 	go func() {
@@ -795,13 +929,6 @@ func shutdownSignal() <-chan os.Signal {
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
 	return ch
-}
-
-func envOr(key, fallback string) string {
-	if v := os.Getenv(key); v != \"\" {
-		return v
-	}
-	return fallback
 }
 """
 
@@ -823,12 +950,12 @@ import (
 )
 
 func main() {
-	addr := envOr(\"HTTP_ADDR\", \":8080\")
-	root := bootstrap.Compose()
+	root := bootstrap.ComposeFromEnv()
 	logger := root.Logger
+	addr := root.Settings.HTTPAddr
 	e := root.HTTPServer
 
-	debugSrv := debugServer(logger, root.DebugHTTPHandler)
+	debugSrv := debugServer(logger, root.Settings.PprofAddr, root.Settings.PprofPort, root.DebugHTTPHandler)
 
 	go func() {
 		logger.WithField("addr", addr).Info("http_listen")
@@ -846,15 +973,10 @@ func main() {
 	_ = e.Shutdown(ctx)
 }
 
-func debugServer(logger *logrus.Logger, handler http.Handler) *http.Server {
+func debugServer(logger *logrus.Logger, host string, port string, handler http.Handler) *http.Server {
 	if handler == nil {
 		return nil
 	}
-	host := os.Getenv("PPROF_ADDR")
-	if host == "" {
-		host = "127.0.0.1"
-	}
-	port := os.Getenv("PPROF_PORT")
 	if port == "" {
 		return nil
 	}
@@ -880,13 +1002,6 @@ func shutdownSignal() <-chan os.Signal {
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
 	return ch
-}
-
-func envOr(key, fallback string) string {
-	if v := os.Getenv(key); v != \"\" {
-		return v
-	}
-	return fallback
 }
 """
 
@@ -914,7 +1029,7 @@ import (
 
 func TestHealthLive(t *testing.T) {
 	t.Parallel()
-	root := bootstrap.Compose()
+	root := bootstrap.ComposeFromEnv()
 	if root.HTTPHandler == nil {
 		t.Fatal("root.HTTPHandler is nil")
 	}
@@ -929,7 +1044,7 @@ func TestHealthLive(t *testing.T) {
 
 func TestHealthReady(t *testing.T) {
 	t.Parallel()
-	root := bootstrap.Compose()
+	root := bootstrap.ComposeFromEnv()
 	if root.HTTPHandler == nil {
 		t.Fatal("root.HTTPHandler is nil")
 	}
@@ -955,7 +1070,7 @@ def _scaffold_placeholder(opt: Options, kind: str) -> None:
 import "REPLACE_MODULE/internal/bootstrap"
 
 func main() {{
-	logger := bootstrap.Compose().Logger
+	logger := bootstrap.ComposeFromEnv().Logger
 	logger.WithField("binary", "{opt.service}-{kind}").Info("todo_implement")
 }}
 """,
