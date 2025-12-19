@@ -45,6 +45,13 @@ Define interfaces in `internal/port/out`, implement in `adapter/out/*`, and inje
 - Add profiling endpoints only when needed (opt-in) and serve them from a separate debug server (set `PPROF_PORT`, optional `PPROF_ADDR`).
 - Use Logrus (`github.com/sirupsen/logrus`) for structured request logging via adapter middleware.
 
+## REST URI and response rules
+
+- Version all APIs: use `/v1/...` by default unless a different version is explicitly specified.
+- Use simple entity naming with domain nouns (e.g., `/v1/orders`, `/v1/payments`, `/v1/customers`).
+- Prefer resource-oriented paths over verbs; use nested resources only when it clarifies ownership.
+- Use suitable HTTP response codes for REST methods (e.g., `200` for reads, `201` for creates, `204` for deletes, `400/404/409` for client errors, `500` for server errors).
+
 ## Scaffolding
 
 Generate a net/http baseline with:
