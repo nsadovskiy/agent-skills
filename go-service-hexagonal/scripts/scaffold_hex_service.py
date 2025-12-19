@@ -101,18 +101,6 @@ def _base_tree(opt: Options) -> None:
 
     _write_project_docs(opt)
 
-    _write(
-        _svc(opt.root) / "domain" / "doc.go",
-        f"package domain\n\n// Package domain contains core business rules for the {opt.service} service.\n",
-    )
-    _write(
-        _svc(opt.root) / "app" / "doc.go",
-        f"package app\n\n// Package app contains use cases for the {opt.service} service.\n",
-    )
-    _write(
-        _svc(opt.root) / "bootstrap" / "doc.go",
-        f"package bootstrap\n\n// Package bootstrap wires adapters and use cases for the {opt.service} service.\n",
-    )
     _write_bootstrap_compose(opt)
 
 
