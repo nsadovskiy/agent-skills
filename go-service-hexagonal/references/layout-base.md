@@ -13,16 +13,15 @@ This layout fits most Go services and supports HTTP, gRPC, workers, and CLIs by 
 │   └── <service>-<binary>/
 │       └── main.go
 ├── internal/
-│   └── <service>/
-│       ├── domain/                 # Entities, value objects, domain services, invariants
-│       ├── app/                    # Use cases (application services)
-│       ├── port/
-│       │   ├── in/                 # Inbound ports (interfaces used by primary adapters)
-│       │   └── out/                # Outbound ports (interfaces required by app)
-│       ├── adapter/
-│       │   ├── in/                 # Primary adapters (http, grpc, cli, consumer)
-│       │   └── out/                # Secondary adapters (db, queue, cache, httpclient)
-│       └── bootstrap/              # Wiring: construct app + adapters; config; lifecycle
+│   ├── domain/                     # Entities, value objects, domain services, invariants
+│   ├── app/                        # Use cases (application services)
+│   ├── port/
+│   │   ├── in/                     # Inbound ports (interfaces used by primary adapters)
+│   │   └── out/                    # Outbound ports (interfaces required by app)
+│   ├── adapter/
+│   │   ├── in/                     # Primary adapters (http, grpc, cli, consumer)
+│   │   └── out/                    # Secondary adapters (db, queue, cache, httpclient)
+│   └── bootstrap/                  # Wiring: construct app + adapters; config; lifecycle
 ├── test/                           # Integration tests (e.g., health endpoints)
 ```
 
@@ -52,4 +51,4 @@ tools/                              # Tooling modules / codegen helpers
 ## Logging
 
 - Standardize on Logrus (`github.com/sirupsen/logrus`) for structured logs.
-- Provide `internal/<service>/bootstrap.NewLogger()` and pass the logger into adapters (HTTP) and long-running loops (workers).
+- Provide `internal/bootstrap.NewLogger()` and pass the logger into adapters (HTTP) and long-running loops (workers).

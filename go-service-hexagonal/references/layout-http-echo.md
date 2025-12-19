@@ -8,7 +8,7 @@ Use this when you want Echo (`github.com/labstack/echo/v4`) as the HTTP server/r
 cmd/
   <service>-api/
     main.go                 # Starts echo, graceful shutdown
-internal/<service>/
+internal/
   adapter/in/http/
     server.go               # Echo routes + DTO mapping; depends on port/in
   adapter/in/debughttp/      # Optional: pprof/trace handler mux (served on separate debug server)
@@ -22,7 +22,7 @@ api/openapi/
 
 - Keep Echo handlers thin: parse/validate request, call `port/in`, map response.
 - Do not let Echo types leak into `app`/`domain`/`port/*`.
-- Put middleware under `internal/<service>/adapter/in/http/middleware` if it grows.
+- Put middleware under `internal/adapter/in/http/middleware` if it grows.
 - Expose `GET /health/live` and `GET /health/ready` for liveness/readiness.
 - Add profiling endpoints only when needed (opt-in) and serve them from a separate debug server (set `PPROF_PORT`, optional `PPROF_ADDR`).
 

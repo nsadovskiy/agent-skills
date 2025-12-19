@@ -77,19 +77,19 @@ def _discover_module_from_go_mod(root: Path) -> str | None:
     return None
 
 
-def _svc(root: Path, service: str) -> Path:
-    return root / "internal" / service
+def _svc(root: Path) -> Path:
+    return root / "internal"
 
 
 def _base_tree(opt: Options) -> None:
     required = [
-        f"internal/{opt.service}/domain",
-        f"internal/{opt.service}/app",
-        f"internal/{opt.service}/port/in",
-        f"internal/{opt.service}/port/out",
-        f"internal/{opt.service}/adapter/in",
-        f"internal/{opt.service}/adapter/out",
-        f"internal/{opt.service}/bootstrap",
+        "internal/domain",
+        "internal/app",
+        "internal/port/in",
+        "internal/port/out",
+        "internal/adapter/in",
+        "internal/adapter/out",
+        "internal/bootstrap",
     ]
     if "grpc" in opt.kinds:
         required.append(f"api/proto/{opt.service}/v1")
@@ -102,15 +102,15 @@ def _base_tree(opt: Options) -> None:
     _write_project_docs(opt)
 
     _write(
-        _svc(opt.root, opt.service) / "domain" / "doc.go",
+        _svc(opt.root) / "domain" / "doc.go",
         f"package domain\n\n// Package domain contains core business rules for the {opt.service} service.\n",
     )
     _write(
-        _svc(opt.root, opt.service) / "app" / "doc.go",
+        _svc(opt.root) / "app" / "doc.go",
         f"package app\n\n// Package app contains use cases for the {opt.service} service.\n",
     )
     _write(
-        _svc(opt.root, opt.service) / "bootstrap" / "doc.go",
+        _svc(opt.root) / "bootstrap" / "doc.go",
         f"package bootstrap\n\n// Package bootstrap wires adapters and use cases for the {opt.service} service.\n",
     )
     _write_bootstrap_compose(opt)
@@ -181,12 +181,12 @@ This repository follows Go best practices and hexagonal (ports-and-adapters / �
 
 **Dependency rule (must hold):**
 
-- `internal/{opt.service}/domain` depends on nothing in the service (only stdlib / pure helpers).
-- `internal/{opt.service}/app` depends on `domain` and `port/out`.
-- `internal/{opt.service}/port/in` and `internal/{opt.service}/port/out` define interfaces at the boundaries.
-- `internal/{opt.service}/adapter/in/*` depends on `port/in` (+ domain types for mapping).
-- `internal/{opt.service}/adapter/out/*` depends on `port/out` (+ domain types for mapping).
-- **All wiring happens only in the composition root**: `internal/{opt.service}/bootstrap/compose.go` (`bootstrap.Compose()`).
+- `internal/domain` depends on nothing in the service (only stdlib / pure helpers).
+- `internal/app` depends on `domain` and `port/out`.
+- `internal/port/in` and `internal/port/out` define interfaces at the boundaries.
+- `internal/adapter/in/*` depends on `port/in` (+ domain types for mapping).
+- `internal/adapter/out/*` depends on `port/out` (+ domain types for mapping).
+- **All wiring happens only in the composition root**: `internal/bootstrap/compose.go` (`bootstrap.Compose()`).
 - `cmd/*` is a thin entrypoint: read env/config, call `bootstrap.Compose()`, start servers/loops, handle shutdown.
 
 **Design guidance:**
@@ -209,17 +209,16 @@ The scaffolder creates only what you asked for, but these are the standard direc
 │   ├── {opt.service}-worker/       # worker/consumer/scheduler (optional)
 │   └── {opt.service}-cli/          # CLI tool (optional)
 ├── internal/
-│   └── {opt.service}/
-│       ├── domain/                 # Entities/value objects/invariants
-│       ├── app/                    # Use-cases (application services)
-│       ├── port/
-│       │   ├── in/                 # Inbound ports (interfaces)
-│       │   └── out/                # Outbound ports (interfaces)
-│       ├── adapter/
-│       │   ├── in/                 # HTTP/gRPC/CLI/worker adapters
-│       │   └── out/                # DB/queue/cache/httpclient adapters
-│       └── bootstrap/
-│           └── compose.go           # Single DI composition root
+│   ├── domain/                      # Entities/value objects/invariants
+│   ├── app/                         # Use-cases (application services)
+│   ├── port/
+│   │   ├── in/                      # Inbound ports (interfaces)
+│   │   └── out/                     # Outbound ports (interfaces)
+│   ├── adapter/
+│   │   ├── in/                      # HTTP/gRPC/CLI/worker adapters
+│   │   └── out/                     # DB/queue/cache/httpclient adapters
+│   └── bootstrap/
+│       └── compose.go               # Single DI composition root
 ├── api/                            # Create only when you have contracts
 │   ├── openapi/                    # OpenAPI specs (HTTP)
 │   └── proto/                      # Protobuf IDL (gRPC)
@@ -234,7 +233,7 @@ The scaffolder creates only what you asked for, but these are the standard direc
 
 ## Composition root (DI)
 
-- Put **all construction/injection** in `internal/{opt.service}/bootstrap/compose.go`.
+- Put **all construction/injection** in `internal/bootstrap/compose.go`.
 - `bootstrap.Compose()` returns a `Root` struct that holds initialized dependencies (logger, servers, clients, repos).
 - Adapters should be constructed with explicit dependencies (interfaces), not by reaching into globals.
 
@@ -310,10 +309,10 @@ def _write_bootstrap_compose(opt: Options) -> None:
         debug_import = ""
         debug_field = ""
         if opt.http_pprof or opt.http_trace:
-            debug_import = '\n\tdebughttp "REPLACE_MODULE/internal/REPLACE_SERVICE/adapter/in/debughttp"'
+            debug_import = '\n\tdebughttp "REPLACE_MODULE/internal/adapter/in/debughttp"'
             debug_field = f"\n\t\tDebugHTTPHandler: debughttp.Handler(debughttp.Options{{Pprof: {str(opt.http_pprof).lower()}, Trace: {str(opt.http_trace).lower()}}}),"
         _write(
-            _svc(opt.root, opt.service) / "bootstrap" / "compose.go",
+            _svc(opt.root) / "bootstrap" / "compose.go",
             """package bootstrap
 
 import (
@@ -323,7 +322,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/sirupsen/logrus"
 
-	httpadapter "REPLACE_MODULE/internal/REPLACE_SERVICE/adapter/in/http"
+	httpadapter "REPLACE_MODULE/internal/adapter/in/http"
 REPLACE_DEBUG_IMPORT
 )
 
@@ -358,8 +357,7 @@ func newLogger() *logrus.Logger {
 }
 """
             .replace("REPLACE_DEBUG_IMPORT", debug_import)
-            .replace("REPLACE_DEBUG_FIELD", debug_field)
-            .replace("REPLACE_SERVICE", opt.service),
+            .replace("REPLACE_DEBUG_FIELD", debug_field),
         )
         return
 
@@ -367,10 +365,10 @@ func newLogger() *logrus.Logger {
         debug_import = ""
         debug_field = ""
         if opt.http_pprof or opt.http_trace:
-            debug_import = '\n\tdebughttp "REPLACE_MODULE/internal/REPLACE_SERVICE/adapter/in/debughttp"'
+            debug_import = '\n\tdebughttp "REPLACE_MODULE/internal/adapter/in/debughttp"'
             debug_field = f"\n\t\tDebugHTTPHandler: debughttp.Handler(debughttp.Options{{Pprof: {str(opt.http_pprof).lower()}, Trace: {str(opt.http_trace).lower()}}}),"
         _write(
-            _svc(opt.root, opt.service) / "bootstrap" / "compose.go",
+            _svc(opt.root) / "bootstrap" / "compose.go",
             """package bootstrap
 
 import (
@@ -379,7 +377,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	httpadapter "REPLACE_MODULE/internal/REPLACE_SERVICE/adapter/in/http"
+	httpadapter "REPLACE_MODULE/internal/adapter/in/http"
 REPLACE_DEBUG_IMPORT
 )
 
@@ -411,13 +409,12 @@ func newLogger() *logrus.Logger {
 }
 """
             .replace("REPLACE_DEBUG_IMPORT", debug_import)
-            .replace("REPLACE_DEBUG_FIELD", debug_field)
-            .replace("REPLACE_SERVICE", opt.service),
+            .replace("REPLACE_DEBUG_FIELD", debug_field),
         )
         return
 
     _write(
-        _svc(opt.root, opt.service) / "bootstrap" / "compose.go",
+        _svc(opt.root) / "bootstrap" / "compose.go",
         """package bootstrap
 
 import (
@@ -452,7 +449,7 @@ def _write_http_debug_pprof(opt: Options) -> None:
     if opt.module is None:
         return
     _write(
-        _svc(opt.root, opt.service) / "adapter" / "in" / "debughttp" / "pprof.go",
+        _svc(opt.root) / "adapter" / "in" / "debughttp" / "pprof.go",
         """package debughttp
 
 import (
@@ -486,14 +483,14 @@ def _scaffold_http_nethttp(opt: Options) -> None:
     if opt.module is None:
         raise SystemExit("--module is required when scaffolding --kinds http (Go imports need a module path).")
     (opt.root / "cmd" / f"{opt.service}-api").mkdir(parents=True, exist_ok=True)
-    (_svc(opt.root, opt.service) / "adapter" / "in" / "http").mkdir(parents=True, exist_ok=True)
-    (_svc(opt.root, opt.service) / "adapter" / "in" / "http" / "middleware").mkdir(parents=True, exist_ok=True)
+    (_svc(opt.root) / "adapter" / "in" / "http").mkdir(parents=True, exist_ok=True)
+    (_svc(opt.root) / "adapter" / "in" / "http" / "middleware").mkdir(parents=True, exist_ok=True)
     if opt.http_pprof or opt.http_trace:
-        (_svc(opt.root, opt.service) / "adapter" / "in" / "debughttp").mkdir(parents=True, exist_ok=True)
+        (_svc(opt.root) / "adapter" / "in" / "debughttp").mkdir(parents=True, exist_ok=True)
         _write_http_debug_pprof(opt)
 
     _write(
-        _svc(opt.root, opt.service) / "adapter" / "in" / "http" / "router.go",
+        _svc(opt.root) / "adapter" / "in" / "http" / "router.go",
         """package http
 
 import (
@@ -501,7 +498,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"REPLACE_MODULE/internal/REPLACE_SERVICE/adapter/in/http/middleware"
+	"REPLACE_MODULE/internal/adapter/in/http/middleware"
 )
 
 type Router struct {
@@ -514,11 +511,10 @@ func (r Router) Handler() http.Handler {
 	mux.HandleFunc("/health/ready", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	return middleware.RequestLogger(r.Logger, mux)
 }
-"""
-        .replace("REPLACE_SERVICE", opt.service),
+""",
     )
     _write(
-        _svc(opt.root, opt.service) / "adapter" / "in" / "http" / "middleware" / "logging.go",
+        _svc(opt.root) / "adapter" / "in" / "http" / "middleware" / "logging.go",
         """package middleware
 
 import (
@@ -577,7 +573,7 @@ import (
 	"syscall"
 	"time"
 
-	"REPLACE_MODULE/internal/REPLACE_SERVICE/bootstrap"
+	"REPLACE_MODULE/internal/bootstrap"
 )
 
 func main() {
@@ -631,7 +627,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"REPLACE_MODULE/internal/REPLACE_SERVICE/bootstrap"
+	"REPLACE_MODULE/internal/bootstrap"
 )
 
 func main() {
@@ -708,7 +704,7 @@ func envOr(key, fallback string) string {
 
     _write(
         opt.root / "cmd" / f"{opt.service}-api" / "main.go",
-        main_go.replace("REPLACE_SERVICE", opt.service),
+        main_go,
     )
     _write_health_tests(opt)
 
@@ -717,13 +713,13 @@ def _scaffold_http_echo(opt: Options) -> None:
     if opt.module is None:
         raise SystemExit("--module is required when scaffolding --kinds http (Go imports need a module path).")
     (opt.root / "cmd" / f"{opt.service}-api").mkdir(parents=True, exist_ok=True)
-    (_svc(opt.root, opt.service) / "adapter" / "in" / "http").mkdir(parents=True, exist_ok=True)
+    (_svc(opt.root) / "adapter" / "in" / "http").mkdir(parents=True, exist_ok=True)
     if opt.http_pprof or opt.http_trace:
-        (_svc(opt.root, opt.service) / "adapter" / "in" / "debughttp").mkdir(parents=True, exist_ok=True)
+        (_svc(opt.root) / "adapter" / "in" / "debughttp").mkdir(parents=True, exist_ok=True)
         _write_http_debug_pprof(opt)
 
     _write(
-        _svc(opt.root, opt.service) / "adapter" / "in" / "http" / "server.go",
+        _svc(opt.root) / "adapter" / "in" / "http" / "server.go",
         """package http
 
 import (
@@ -772,8 +768,7 @@ func New(logger *logrus.Logger) *echo.Echo {
 
 	return e
 }
-"""
-        .replace("REPLACE_SERVICE", opt.service),
+""",
     )
 
     main_go = """package main
@@ -786,7 +781,7 @@ import (
 	"syscall"
 	"time"
 
-	"REPLACE_MODULE/internal/REPLACE_SERVICE/bootstrap"
+	"REPLACE_MODULE/internal/bootstrap"
 )
 
 func main() {
@@ -836,7 +831,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"REPLACE_MODULE/internal/REPLACE_SERVICE/bootstrap"
+	"REPLACE_MODULE/internal/bootstrap"
 )
 
 func main() {
@@ -909,7 +904,7 @@ func envOr(key, fallback string) string {
 
     _write(
         opt.root / "cmd" / f"{opt.service}-api" / "main.go",
-        main_go.replace("REPLACE_SERVICE", opt.service),
+        main_go,
     )
     _write_health_tests(opt)
 
@@ -926,7 +921,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"REPLACE_MODULE/internal/REPLACE_SERVICE/bootstrap"
+	"REPLACE_MODULE/internal/bootstrap"
 )
 
 func TestHealthLive(t *testing.T) {
@@ -958,18 +953,18 @@ func TestHealthReady(t *testing.T) {
 		t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
 	}
 }
-""".replace("REPLACE_SERVICE", opt.service),
+""",
     )
 
 
 def _scaffold_placeholder(opt: Options, kind: str) -> None:
     (opt.root / "cmd" / f"{opt.service}-{kind}").mkdir(parents=True, exist_ok=True)
-    (_svc(opt.root, opt.service) / "adapter" / "in" / kind).mkdir(parents=True, exist_ok=True)
+    (_svc(opt.root) / "adapter" / "in" / kind).mkdir(parents=True, exist_ok=True)
     _write(
         opt.root / "cmd" / f"{opt.service}-{kind}" / "main.go",
         f"""package main
 
-import "REPLACE_MODULE/internal/{opt.service}/bootstrap"
+import "REPLACE_MODULE/internal/bootstrap"
 
 func main() {{
 	logger := bootstrap.Compose().Logger

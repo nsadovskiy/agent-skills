@@ -8,7 +8,7 @@ Use this for queue consumers, cron-like jobs, background processors, or outbox p
 cmd/
   <service>-worker/
     main.go
-internal/<service>/
+internal/
   adapter/in/worker/
     consumer/            # Message handlers / job runners
     scheduler/           # Cron wiring (if applicable)
@@ -19,11 +19,11 @@ internal/<service>/
 ## Outbox and eventing (common patterns)
 
 ```text
-internal/<service>/adapter/out/
+internal/adapter/out/
   kafka/
   sqs/
   nats/
-internal/<service>/port/out/
+internal/port/out/
   event_publisher.go
 ```
 

@@ -10,7 +10,7 @@ If you prefer Echo, use `references/layout-http-echo.md`.
 cmd/
   <service>-api/
     main.go
-internal/<service>/
+internal/
   adapter/in/http/
     handlers/            # Request handlers, DTO mapping, validation
     middleware/          # Authn/z, request IDs, timeouts, logging
@@ -24,20 +24,20 @@ api/openapi/
 
 ## Common inbound port pattern
 
-- Define inbound ports in `internal/<service>/port/in` as small interfaces per use case.
-- Implement them in `internal/<service>/app`.
+- Define inbound ports in `internal/port/in` as small interfaces per use case.
+- Implement them in `internal/app`.
 - HTTP handlers depend on `port/in` (not on concrete `app` types).
 
 ## Common outbound adapters
 
 ```text
-internal/<service>/adapter/out/
+internal/adapter/out/
   postgres/
   redis/
   httpclient/
 ```
 
-Define interfaces in `internal/<service>/port/out`, implement in `adapter/out/*`, and inject into `app/*`.
+Define interfaces in `internal/port/out`, implement in `adapter/out/*`, and inject into `app/*`.
 
 ## Ops endpoints + logging
 

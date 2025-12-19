@@ -8,7 +8,7 @@ Use this for operator tools, admin commands, local runners, and one-off utilitie
 cmd/
   <service>-cli/
     main.go
-internal/<service>/
+internal/
   adapter/in/cli/
     commands/            # Subcommands; argument parsing; output formatting
   bootstrap/

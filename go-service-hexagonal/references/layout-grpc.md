@@ -12,7 +12,7 @@ api/proto/
   <service>/
     v1/
       <service>.proto
-internal/<service>/
+internal/
   adapter/in/grpc/
     server.go            # gRPC server registration and request mapping
     interceptors/        # Authn/z, logging, metrics, tracing
@@ -25,7 +25,7 @@ internal/<service>/
 - Keep IDL in `api/proto/...`.
 - Place generated Go code either:
   - next to IDL (common in small repos), or
-  - under `internal/<service>/adapter/in/grpc/gen/...` (keeps `internal/` encapsulation).
+  - under `internal/adapter/in/grpc/gen/...` (keeps `internal/` encapsulation).
 
 Pick one and keep it consistent.
 
