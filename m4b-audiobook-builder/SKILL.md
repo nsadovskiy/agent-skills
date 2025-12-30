@@ -26,8 +26,9 @@ Build a single player-friendly M4B from many audio parts or merge existing M4B p
    - If a source codec is exotic or poorly supported, re-encode to a well-supported codec (AAC for M4B is the default).
    - Use multi-threaded modes where supported (e.g., ffmpeg `-threads`) to speed up transcoding.
    - If the merge is long-running, set a sufficiently long command timeout in your runner up front (e.g., Codex CLI `timeout_ms`) to avoid re-runs.
+   - If inputs may contain embedded cover art (common in MP3), map audio only (e.g., `-map 0:a:0 -vn`) to avoid accidental video streams.
    - Use `-c copy` only when M4B parts share compatible codecs.
-9. Apply audiobook metadata and cover art. Treat author and performer as distinct fields (author for `albumArtist`, performer/narrator for `artist`). If cover art found, embed it in the final M4B.
+9. Apply audiobook metadata and cover art. Treat author and performer as distinct fields (author for `albumArtist`, performer/narrator for `artist`) and format person names as `Last First`. If cover art found, embed it in the final M4B.
 10. Validate with `mediainfo`, `mp4info`, and a target player.
 
 ## Helper Script
@@ -35,15 +36,23 @@ Build a single player-friendly M4B from many audio parts or merge existing M4B p
 Run:
 
 ```bash
-python3 scripts/build_m4b_inputs.py --root . --recursive --chapter-mode dir --files-out files.txt --meta-out meta.txt
+python3 scripts/build_m4b_inputs.py --root . --recursive --chapter-mode dir --files-out files.txt --meta-out meta.txt --ffmpeg-out ffmpeg.sh --output-m4b book.m4b
 ```
 
 Use this to create:
 
 - `files.txt` for ffmpeg concat input
 - `meta.txt` for ffmpeg chapter metadata
+- `ffmpeg.sh` with a ready-to-run ffmpeg command line (use `--no-ffmpeg-out` to skip)
+- `atomicparsley.sh` with a ready-to-run metadata command (use `--no-atomicparsley-out` to skip)
 
-Use `--chapter-mode file` for per-file chapters, or `--chapter-mode none` to generate only `files.txt`.
+To generate a safe output filename like `Author - Title.m4b`, supply `--output-author` and `--output-title` (invalid filesystem characters are replaced). The script reorders author names to `Last First` by default when building the filename (use `--name-order keep` to preserve input). If omitted and `--output-m4b` is left at `book.m4b`, the script derives author/title from the first input's tags and falls back to the folder name. If `--output-m4b` lacks the extension, `.m4b` is appended.
+
+```bash
+python3 scripts/build_m4b_inputs.py --root . --chapter-mode file --files-out files.txt --meta-out meta.txt --output-author "Author" --output-title "Title"
+```
+
+Use `--chapter-mode file` for per-file chapters, or `--chapter-mode none` to generate only `files.txt`. For file chapters, the script prefers embedded track titles when present and falls back to filenames.
 Use `--chapter-mode file` only when file boundaries match real chapters; otherwise prefer `dir` or a curated chapter list.
 
 For multi-part M4B sets, propose a merge order before any concat work:

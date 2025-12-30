@@ -79,6 +79,16 @@ For chapters, prefer the helper script (`scripts/build_m4b_inputs.py`) to build 
 
 ## Scenario A: Mixed audio files to one M4B
 
+### 0. Optional metadata scan
+
+If you need to confirm title/author/narrator metadata from a source file, prefer JSON output to avoid truncation in terminal output.
+
+```bash
+exiftool -json -Title -Artist -Album -AlbumArtist -TrackNumber -DiscNumber part01.mp3
+```
+
+If tags are incomplete, fall back to the folder name and filenames for a clean, user-confirmed metadata set.
+
 ### 1. Build an ordered file list
 
 ```bash
@@ -103,8 +113,26 @@ END=123456
 title=Chapter 1
 ```
 
-Generate `meta.txt` using the helper script or a custom workflow based on `ffprobe` durations.
+Generate `meta.txt` using the helper script or a custom workflow based on `ffprobe` durations. When using per-file chapters, the helper script prefers embedded track titles when present.
 If per-file chapters are too granular compared to the real book chapters, generate chapters per directory or hand-curate the chapter list instead of per-file chapters.
+
+Helper script example (also emits `ffmpeg.sh` and `atomicparsley.sh` with ready-to-run command lines):
+
+```bash
+python3 scripts/build_m4b_inputs.py --root . --chapter-mode file --files-out files.txt --meta-out meta.txt --ffmpeg-out ffmpeg.sh --output-m4b book.m4b
+```
+
+To build a safe output filename from author/title (the script also appends `.m4b` if missing). By default, author and narrator names are reordered to `Last First` when building the filename and AtomicParsley command; use `--name-order keep` to preserve the input.
+
+```bash
+python3 scripts/build_m4b_inputs.py --root . --chapter-mode file --files-out files.txt --meta-out meta.txt --output-author "Author" --output-title "Title"
+```
+
+If you prefer a plain text filename:
+
+```bash
+python3 scripts/build_m4b_inputs.py --root . --chapter-mode file --files-out files.txt --meta-out meta.txt --ffmpeg-out ffmpeg.txt --output-m4b book.m4b
+```
 
 #### Curated chapter list example
 
@@ -135,6 +163,7 @@ MP4Box -chap chapters.txt book.m4b
 ```bash
 ffmpeg -f concat -safe 0 -i files.txt \
   -f ffmetadata -i meta.txt \
+  -map 0:a:0 -vn \
   -c:a aac -b:a 96k -threads 0 \
   -map_metadata 1 -map_chapters 1 \
   -movflags +faststart \
@@ -142,6 +171,7 @@ ffmpeg -f concat -safe 0 -i files.txt \
 ```
 
 If the transcode is large (multi-hour), set a sufficiently long timeout up front in your runner to avoid re-runs.
+If the source files include embedded cover art, mapping audio only (as above) avoids accidentally creating a video stream.
 
 ### 4. Final metadata pass
 
@@ -153,6 +183,8 @@ AtomicParsley book.m4b \
   --artwork cover.jpg \
   --overWrite
 ```
+
+Format person names as `Last First` in both `--artist` (narrator) and `--albumArtist` (author).
 
 ### Cover art handling
 
@@ -265,3 +297,4 @@ If a cover image is available alongside the parts or embedded in a source file, 
 - If a source uses an exotic or poorly supported codec, re-encode to a well-supported format (AAC for M4B).
 - Keep author (book author) distinct from performer/narrator; map performer to `artist` and author to `albumArtist`.
 - Use multi-threaded modes where tools support them (e.g., ffmpeg `-threads`) to speed up transcoding.
+- If ffmpeg emits non-monotonic DTS warnings and playback glitches appear, retry with `-fflags +genpts -avoid_negative_ts make_zero`.
