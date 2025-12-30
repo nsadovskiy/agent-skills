@@ -9,7 +9,7 @@ cmd/
   <service>-cli/
     main.go
 internal/
-  adapter/in/cli/
+  interface/cli/
     commands/            # Subcommands; argument parsing; output formatting
   bootstrap/
     cli.go               # Construct command tree; inject ports

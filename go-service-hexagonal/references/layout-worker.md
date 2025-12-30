@@ -9,7 +9,7 @@ cmd/
   <service>-worker/
     main.go
 internal/
-  adapter/in/worker/
+  interface/worker/
     consumer/            # Message handlers / job runners
     scheduler/           # Cron wiring (if applicable)
   bootstrap/
@@ -19,11 +19,10 @@ internal/
 ## Outbox and eventing (common patterns)
 
 ```text
-internal/adapter/out/
+internal/adapter/
   kafka/
   sqs/
   nats/
-internal/port/out/
   event_publisher.go
 ```
 

@@ -15,12 +15,8 @@ This layout fits most Go services and supports HTTP, gRPC, workers, and CLIs by 
 ├── internal/
 │   ├── domain/                     # Entities, value objects, domain services, invariants
 │   ├── app/                        # Use cases (application services)
-│   ├── port/
-│   │   ├── in/                     # Inbound ports (interfaces used by primary adapters)
-│   │   └── out/                    # Outbound ports (interfaces required by app)
-│   ├── adapter/
-│   │   ├── in/                     # Primary adapters (http, grpc, cli, consumer)
-│   │   └── out/                    # Secondary adapters (db, queue, cache, httpclient)
+│   ├── interface/                  # Inbound ports + adapters (http, grpc, cli, worker)
+│   ├── adapter/                    # Outbound ports + adapters (db, queue, cache, httpclient)
 │   └── bootstrap/                  # Wiring: construct app + adapters; config; lifecycle
 ├── test/                           # Integration tests (e.g., health endpoints)
 ```

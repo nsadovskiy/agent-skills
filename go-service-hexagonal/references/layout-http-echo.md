@@ -9,9 +9,9 @@ cmd/
   <service>-api/
     main.go                 # Starts echo, graceful shutdown
 internal/
-  adapter/in/http/
-    server.go               # Echo routes + DTO mapping; depends on port/in
-  adapter/in/debughttp/      # Optional: pprof/trace handler mux (served on separate debug server)
+  interface/http/
+    server.go               # Echo routes + DTO mapping; depends on internal/interface
+  interface/debughttp/      # Optional: pprof/trace handler mux (served on separate debug server)
   bootstrap/
     http.go                 # NewEcho(): wires ports and adapters
 api/openapi/
@@ -20,9 +20,9 @@ api/openapi/
 
 ## Hexagonal boundaries (Echo-specific reminders)
 
-- Keep Echo handlers thin: parse/validate request, call `port/in`, map response.
-- Do not let Echo types leak into `app`/`domain`/`port/*`.
-- Put middleware under `internal/adapter/in/http/middleware` if it grows.
+- Keep Echo handlers thin: parse/validate request, call `internal/interface`, map response.
+- Do not let Echo types leak into `app`/`domain`/`internal/interface` or `internal/adapter`.
+- Put middleware under `internal/interface/http/middleware` if it grows.
 - Expose `GET /health/live` and `GET /health/ready` for liveness/readiness.
 - Add profiling endpoints only when needed (opt-in) and serve them from a separate debug server (set `PPROF_PORT`, optional `PPROF_ADDR`).
 

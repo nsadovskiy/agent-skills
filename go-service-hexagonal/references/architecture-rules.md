@@ -5,10 +5,10 @@ Use this as a checklist when reviewing or proposing a directory structure.
 ## Allowed dependencies (high level)
 
 - `domain` depends on nothing in the service (only standard library or small pure helpers).
-- `app` depends on `domain` and `port/out`.
-- `port/in` and `port/out` depend on `domain` types as needed.
-- `adapter/in/*` depends on `port/in` and `domain` (DTO mapping).
-- `adapter/out/*` depends on `port/out` and `domain` (persistence/message mapping).
+- `app` depends on `domain` and outbound ports in `internal/adapter`.
+- Inbound ports in `internal/interface` and outbound ports in `internal/adapter` depend on `domain` types as needed.
+- Inbound adapters under `internal/interface/*` depend on inbound ports in `internal/interface` and `domain` (DTO mapping).
+- Outbound adapters under `internal/adapter/*` depend on outbound ports in `internal/adapter` and `domain` (persistence/message mapping).
 - `bootstrap` depends on everything to wire it together.
 - `cmd/*` depends on `bootstrap` (and minimal infra like `os`, `signal`, config parsing).
 
@@ -18,8 +18,8 @@ Use this as a checklist when reviewing or proposing a directory structure.
 
 ## Keep interfaces at the boundary
 
-- Define inbound interfaces where adapters need them (`port/in`).
-- Define outbound interfaces where the app needs them (`port/out`).
+- Define inbound interfaces where adapters need them (`internal/interface`).
+- Define outbound interfaces where the app needs them (`internal/adapter`).
 - Avoid “interface soup”: keep ports small and focused on a single use case or capability.
 
 ## Common structure smells

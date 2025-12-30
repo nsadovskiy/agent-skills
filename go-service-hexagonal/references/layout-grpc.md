@@ -13,7 +13,7 @@ api/proto/
     v1/
       <service>.proto
 internal/
-  adapter/in/grpc/
+  interface/grpc/
     server.go            # gRPC server registration and request mapping
     interceptors/        # Authn/z, logging, metrics, tracing
   bootstrap/
@@ -25,11 +25,11 @@ internal/
 - Keep IDL in `api/proto/...`.
 - Place generated Go code either:
   - next to IDL (common in small repos), or
-  - under `internal/adapter/in/grpc/gen/...` (keeps `internal/` encapsulation).
+  - under `internal/interface/grpc/gen/...` (keeps `internal/` encapsulation).
 
 Pick one and keep it consistent.
 
 ## Port mapping
 
-- `adapter/in/grpc` depends on `port/in` and maps protobuf DTOs ↔ domain types.
+- `internal/interface/grpc` depends on `internal/interface` and maps protobuf DTOs ↔ domain types.
 - Keep business validation in `domain`/`app` rather than in protobuf handlers.

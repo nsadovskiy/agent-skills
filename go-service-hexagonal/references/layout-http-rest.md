@@ -11,11 +11,11 @@ cmd/
   <service>-api/
     main.go
 internal/
-  adapter/in/http/
+  interface/http/
     handlers/            # Request handlers, DTO mapping, validation
     middleware/          # Authn/z, request IDs, timeouts, logging
     router.go            # Routes → handlers
-  adapter/in/debughttp/  # Optional: pprof/trace handler mux (served on separate debug server)
+  interface/debughttp/  # Optional: pprof/trace handler mux (served on separate debug server)
   bootstrap/
     http.go              # Build router, server options, graceful shutdown
 api/openapi/
@@ -24,20 +24,20 @@ api/openapi/
 
 ## Common inbound port pattern
 
-- Define inbound ports in `internal/port/in` as small interfaces per use case.
+- Define inbound ports in `internal/interface` as small interfaces per use case.
 - Implement them in `internal/app`.
-- HTTP handlers depend on `port/in` (not on concrete `app` types).
+- HTTP handlers depend on `internal/interface` (not on concrete `app` types).
 
 ## Common outbound adapters
 
 ```text
-internal/adapter/out/
+internal/adapter/
   postgres/
   redis/
   httpclient/
 ```
 
-Define interfaces in `internal/port/out`, implement in `adapter/out/*`, and inject into `app/*`.
+Define interfaces in `internal/adapter`, implement in `internal/adapter/*`, and inject into `app/*`.
 
 ## Ops endpoints + logging
 
