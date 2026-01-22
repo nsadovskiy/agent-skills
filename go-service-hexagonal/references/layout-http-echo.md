@@ -32,6 +32,8 @@ Use the scaffolder with:
 
 `python3 scripts/scaffold_hex_service.py --root <repo> --service <name> --kinds http` (Echo is the default; module defaults to folder name for new projects)
 
+Add settings loading (env + optional config via Koanf) with `--settings config`.
+
 If `go.mod` is created (new project), the scaffolder runs `go mod tidy` to fetch dependencies (Echo + Logrus). Use `--skip-deps` to skip.
 
 Optional debug endpoints:

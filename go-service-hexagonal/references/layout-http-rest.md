@@ -58,6 +58,8 @@ Generate a net/http baseline with:
 
 `python3 scripts/scaffold_hex_service.py --root <repo> --service <name> --kinds http --http-framework nethttp`
 
+Add settings loading (env + optional config via Koanf) with `--settings config`.
+
 Optional debug endpoints:
 
 - Add pprof: append `--http-pprof`

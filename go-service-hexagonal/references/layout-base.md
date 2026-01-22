@@ -16,6 +16,7 @@ This layout fits most Go services and supports HTTP, gRPC, workers, and CLIs by 
 │   ├── domain/                     # Entities, value objects, domain services, invariants
 │   ├── app/                        # Use cases (application services)
 │   ├── interface/                  # Inbound ports + adapters (http, grpc, cli, worker)
+│   │   └── options/                # Optional (config mode): env + config settings via Koanf (env overrides config)
 │   ├── adapter/                    # Outbound ports + adapters (db, queue, cache, httpclient)
 │   └── bootstrap/                  # Wiring: construct app + adapters; config; lifecycle
 ├── test/                           # Integration tests (e.g., health endpoints)
@@ -42,7 +43,7 @@ tools/                              # Tooling modules / codegen helpers
 
 - Keep most code under `internal/` to prevent accidental reuse across repos.
 - Use `pkg/` only for code that is intentionally reusable by external modules/repos.
-- Keep `cmd/*` thin: parse config, set up logging/tracing, call `bootstrap`, run.
+- Keep `cmd/*` thin: use one of three settings modes—none (defaults only), env (env-only), config (env + optional config via Koanf; env overrides config; default TOML when no extension).
 
 ## Logging
 

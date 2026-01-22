@@ -26,7 +26,8 @@ description: Define, review, and scaffold Go service directory structures using 
 - Put **use cases** in `internal/app` and define **inbound ports** in `internal/interface`.
 - Define **outbound ports** (interfaces to DB, queues, HTTP clients) in `internal/adapter`.
 - Implement inbound adapters in `internal/interface/*` (primary) and outbound adapters in `internal/adapter/*` (secondary).
-- Perform all wiring in a single composition root: `internal/bootstrap.Compose(settingsRepo)` and keep `cmd/*` thin.
+- Choose a settings mode: none (defaults only), env (env-only), or config (env + optional config file via Koanf, env overrides config). Use `internal/interface/options` only for config mode.
+- Perform all wiring in a single composition root: `internal/bootstrap.Compose(...)` and keep `cmd/*` thin.
 
 Use `references/architecture-rules.md` as the dependency rulebook.
 
@@ -35,6 +36,18 @@ Use `references/architecture-rules.md` as the dependency rulebook.
 Run the scaffolder to generate a starting tree plus minimal compileable stubs:
 
 `python3 scripts/scaffold_hex_service.py --root <repo> --service <name> --kinds http,worker`
+
+Pick a settings mode:
+
+- Defaults only: `--settings none`
+- Env only (default): `--settings env`
+- Env + config file (Koanf): `--settings config`
+
+Example (config mode):
+
+`python3 scripts/scaffold_hex_service.py --root <repo> --service <name> --kinds http --settings config`
+
+Config files (when enabled) support json/yaml/toml with keys: `http_addr`, `pprof_addr`, `pprof_port`, `log_level`. If the config file has no extension, TOML is assumed. Environment values override config values when both are set.
 
 HTTP scaffolding defaults to Echo. For explicit Echo:
 

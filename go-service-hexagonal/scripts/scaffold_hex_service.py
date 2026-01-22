@@ -20,6 +20,7 @@ class Options:
     http_framework: str
     http_pprof: bool
     http_trace: bool
+    settings_mode: str
     skip_deps: bool
 
 
@@ -87,10 +88,10 @@ def _base_tree(opt: Options) -> None:
         "internal/app",
         "internal/interface",
         "internal/adapter",
-        "internal/adapter/env",
-        "internal/app/settings",
         "internal/bootstrap",
     ]
+    if opt.settings_mode == "config":
+        required.append("internal/interface/options")
     if "grpc" in opt.kinds:
         required.append(f"api/proto/{opt.service}/v1")
     if "http" in opt.kinds:
@@ -101,17 +102,37 @@ def _base_tree(opt: Options) -> None:
 
     _write_project_docs(opt)
 
-    _write_settings_port(opt)
-    _write_env_adapter(opt)
-    _write_settings_repo(opt)
+    if opt.settings_mode == "config":
+        _write_options_package(opt)
 
     _write_bootstrap_compose(opt)
 
 
-def _write_settings_port(opt: Options) -> None:
+def _write_options_package(opt: Options) -> None:
     _write(
-        _svc(opt.root) / "adapter" / "settings.go",
-        """package adapter
+        _svc(opt.root) / "interface" / "options" / "options.go",
+        """package options
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/knadh/koanf/v2"
+	"github.com/knadh/koanf/parsers/json"
+	"github.com/knadh/koanf/parsers/toml"
+	"github.com/knadh/koanf/parsers/yaml"
+	"github.com/knadh/koanf/providers/file"
+)
+
+const (
+	envHTTPAddr   = "HTTP_ADDR"
+	envPprofAddr  = "PPROF_ADDR"
+	envPprofPort  = "PPROF_PORT"
+	envLogLevel   = "LOG_LEVEL"
+	envConfigPath = "CONFIG_PATH"
+)
 
 type Settings struct {
 	HTTPAddr  string
@@ -120,38 +141,122 @@ type Settings struct {
 	LogLevel  string
 }
 
-type SettingsReader interface {
-	Load() Settings
+type Loader interface {
+	Load() (Settings, error)
 }
 
-type SettingsRepository interface {
+type Store interface {
 	Get() Settings
-	Reload() Settings
+	Reload() (Settings, error)
 }
-""",
-    )
 
+type Repository struct {
+	loader   Loader
+	settings Settings
+	lastErr error
+}
 
-def _write_env_adapter(opt: Options) -> None:
-    _write(
-        _svc(opt.root) / "adapter" / "env" / "env.go",
-        """package env
+func NewRepository(loader Loader) *Repository {
+	repo := &Repository{loader: loader}
+	_, _ = repo.Reload()
+	return repo
+}
 
-import (
-	"os"
+func (r *Repository) Get() Settings {
+	return r.settings
+}
 
-	portout "REPLACE_MODULE/internal/adapter"
-)
-
-type Reader struct{}
-
-func (Reader) Load() portout.Settings {
-	return portout.Settings{
-		HTTPAddr:  stringOr("HTTP_ADDR", ":8080"),
-		PprofAddr: stringOr("PPROF_ADDR", "127.0.0.1"),
-		PprofPort: os.Getenv("PPROF_PORT"),
-		LogLevel:  os.Getenv("LOG_LEVEL"),
+func (r *Repository) Reload() (Settings, error) {
+	if r.loader == nil {
+		return r.settings, nil
 	}
+	settings, err := r.loader.Load()
+	r.lastErr = err
+	r.settings = settings
+	return r.settings, err
+}
+
+func (r *Repository) LastError() error {
+	return r.lastErr
+}
+
+type EnvLoader struct{}
+
+func (EnvLoader) Load() (Settings, error) {
+	settings := Settings{
+		HTTPAddr:  stringOr(envHTTPAddr, ":8080"),
+		PprofAddr: stringOr(envPprofAddr, "127.0.0.1"),
+		PprofPort: os.Getenv(envPprofPort),
+		LogLevel:  os.Getenv(envLogLevel),
+	}
+	configPath := os.Getenv(envConfigPath)
+	if configPath == "" {
+		return settings, nil
+	}
+	settings, err := applyConfigFile(settings, configPath)
+	if err != nil {
+		return settings, err
+	}
+	return applyEnvOverrides(settings), nil
+}
+
+func applyConfigFile(base Settings, path string) (Settings, error) {
+	k := koanf.New(".")
+	parser, err := parserForPath(path)
+	if err != nil {
+		return base, err
+	}
+	if err := k.Load(file.Provider(path), parser); err != nil {
+		return base, err
+	}
+	return mergeConfig(base, k), nil
+}
+
+func parserForPath(path string) (koanf.Parser, error) {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case "":
+		return toml.Parser(), nil
+	case ".json":
+		return json.Parser(), nil
+	case ".yaml", ".yml":
+		return yaml.Parser(), nil
+	case ".toml":
+		return toml.Parser(), nil
+	default:
+		return nil, fmt.Errorf("unsupported config extension: %s", filepath.Ext(path))
+	}
+}
+
+func applyEnvOverrides(base Settings) Settings {
+	if v := os.Getenv(envHTTPAddr); v != "" {
+		base.HTTPAddr = v
+	}
+	if v := os.Getenv(envPprofAddr); v != "" {
+		base.PprofAddr = v
+	}
+	if v := os.Getenv(envPprofPort); v != "" {
+		base.PprofPort = v
+	}
+	if v := os.Getenv(envLogLevel); v != "" {
+		base.LogLevel = v
+	}
+	return base
+}
+
+func mergeConfig(base Settings, k *koanf.Koanf) Settings {
+	if k.Exists("http_addr") {
+		base.HTTPAddr = k.String("http_addr")
+	}
+	if k.Exists("pprof_addr") {
+		base.PprofAddr = k.String("pprof_addr")
+	}
+	if k.Exists("pprof_port") {
+		base.PprofPort = k.String("pprof_port")
+	}
+	if k.Exists("log_level") {
+		base.LogLevel = k.String("log_level")
+	}
+	return base
 }
 
 func stringOr(key, fallback string) string {
@@ -159,39 +264,6 @@ func stringOr(key, fallback string) string {
 		return v
 	}
 	return fallback
-}
-""",
-    )
-
-
-def _write_settings_repo(opt: Options) -> None:
-    _write(
-        _svc(opt.root) / "app" / "settings" / "repository.go",
-        """package settings
-
-import portout "REPLACE_MODULE/internal/adapter"
-
-type Repository struct {
-	reader   portout.SettingsReader
-	settings portout.Settings
-}
-
-func NewRepository(reader portout.SettingsReader) *Repository {
-	repo := &Repository{reader: reader}
-	repo.Reload()
-	return repo
-}
-
-func (r *Repository) Get() portout.Settings {
-	return r.settings
-}
-
-func (r *Repository) Reload() portout.Settings {
-	if r.reader == nil {
-		return r.settings
-	}
-	r.settings = r.reader.Load()
-	return r.settings
 }
 """,
     )
@@ -211,7 +283,7 @@ def _write_project_docs(opt: Options) -> None:
 
     binaries_block = "\n".join(binaries) if binaries else "- (none scaffolded)"
     debug_section = ""
-    env_pprof = ""
+    env_pprof: list[str] = []
     if "http" in opt.kinds and (opt.http_pprof or opt.http_trace):
         debug_section = """
 ## Debug endpoints (optional)
@@ -221,7 +293,29 @@ When scaffolded with `--http-pprof` and/or `--http-trace`, these are served by a
 - `GET http://$PPROF_ADDR:$PPROF_PORT/debug/pprof/` (pprof index)
 - `GET http://$PPROF_ADDR:$PPROF_PORT/debug/pprof/trace` (execution trace)
 """
-        env_pprof = "\n- `PPROF_ADDR` (optional; default `127.0.0.1`)\n- `PPROF_PORT` (optional; enables debug server on `$PPROF_ADDR:<port>`)"
+        env_pprof = [
+            "- `PPROF_ADDR` (optional; default `127.0.0.1`)",
+            "- `PPROF_PORT` (optional; enables debug server on `$PPROF_ADDR:<port>`)",
+        ]
+
+    env_lines: list[str] = []
+    if opt.settings_mode == "none":
+        env_lines = ["- (none; defaults are compiled into bootstrap)"]
+    else:
+        env_lines = [
+            "- `HTTP_ADDR` (default `:8080`)",
+            "- `LOG_LEVEL` (e.g. `info`, `debug`)",
+        ]
+        if opt.settings_mode == "config":
+            env_lines.append(
+                "- `CONFIG_PATH` (optional; config file path; formats: json/yaml/toml; default `toml` when no extension; keys: `http_addr`, `pprof_addr`, `pprof_port`, `log_level`)"
+            )
+        if env_pprof:
+            env_lines.extend(env_pprof)
+    env_block = "\n".join(env_lines)
+    config_note = ""
+    if opt.settings_mode == "config":
+        config_note = "\nEnvironment values override config values when `CONFIG_PATH` is set."
 
     _write_if_missing(
         opt.root / "README.md",
@@ -247,10 +341,38 @@ go run ./cmd/{opt.service}-api
 
 Environment:
 
-- `HTTP_ADDR` (default `:8080`)
-- `LOG_LEVEL` (e.g. `info`, `debug`){env_pprof}
+{env_block}
+{config_note}
 """,
     )
+
+    compose_call = "bootstrap.Compose(settingsStore)" if opt.settings_mode == "config" else "bootstrap.Compose(settings)"
+    compose_entrypoint = (
+        " (or build a settings store via `internal/interface/options` and call `bootstrap.Compose(settingsStore)`)"
+        if opt.settings_mode == "config"
+        else ""
+    )
+    options_tree_line = (
+        "│   │   └── options/                 # Env/config settings loading\n"
+        if opt.settings_mode == "config"
+        else ""
+    )
+    if opt.settings_mode == "config":
+        compose_guidance = (
+            "- Load settings via `internal/interface/options` (env + optional config file via Koanf), store them in a settings store, and pass it into "
+            "`bootstrap.Compose(settingsStore)` (or use `bootstrap.ComposeFromEnv()`).\n"
+            "- `bootstrap.Compose(settingsStore)` returns a `Root` struct that holds initialized dependencies (logger, servers, clients, repos)."
+        )
+    elif opt.settings_mode == "env":
+        compose_guidance = (
+            "- Load settings via `bootstrap.ComposeFromEnv()` and override with `bootstrap.Compose(settings)` when needed.\n"
+            "- `bootstrap.Compose(settings)` returns a `Root` struct that holds initialized dependencies (logger, servers, clients, repos)."
+        )
+    else:
+        compose_guidance = (
+            "- Use `bootstrap.ComposeFromEnv()` for defaults (no env/config), or call `bootstrap.Compose(settings)` when you need overrides.\n"
+            "- `bootstrap.Compose(settings)` returns a `Root` struct that holds initialized dependencies (logger, servers, clients, repos)."
+        )
 
     _write_if_missing(
         opt.root / "AGENTS.md",
@@ -267,8 +389,8 @@ This repository follows Go best practices and hexagonal (ports-and-adapters / �
 - Inbound ports in `internal/interface` and outbound ports in `internal/adapter` define interfaces at the boundaries.
 - Inbound adapters under `internal/interface/*` depend on inbound ports in `internal/interface` (+ domain types for mapping).
 - Outbound adapters under `internal/adapter/*` depend on outbound ports in `internal/adapter` (+ domain types for mapping).
-- **All wiring happens only in the composition root**: `internal/bootstrap/compose.go` (`bootstrap.Compose(settingsRepo)`).
-- `cmd/*` is a thin entrypoint: call `bootstrap.ComposeFromEnv()` (or build a settings repo and call `bootstrap.Compose(settingsRepo)`), start servers/loops, handle shutdown.
+- **All wiring happens only in the composition root**: `internal/bootstrap/compose.go` (`{compose_call}`).
+- `cmd/*` is a thin entrypoint: call `bootstrap.ComposeFromEnv()`{compose_entrypoint}, start servers/loops, handle shutdown.
 
 **Design guidance:**
 
@@ -293,7 +415,7 @@ The scaffolder creates only what you asked for, but these are the standard direc
 │   ├── domain/                      # Entities/value objects/invariants
 │   ├── app/                         # Use-cases (application services)
 │   ├── interface/                   # Inbound ports + adapters (http/grpc/cli/worker)
-│   ├── adapter/                     # Outbound ports + adapters (db/queue/cache/httpclient)
+{options_tree_line}│   ├── adapter/                     # Outbound ports + adapters (db/queue/cache/httpclient)
 │   └── bootstrap/
 │       └── compose.go               # Single DI composition root
 ├── api/                            # Create only when you have contracts
@@ -311,8 +433,7 @@ The scaffolder creates only what you asked for, but these are the standard direc
 ## Composition root (DI)
 
 - Put **all construction/injection** in `internal/bootstrap/compose.go`.
-- Load env settings via `internal/adapter/env`, store them in a settings repo, and pass the repo into `bootstrap.Compose(settingsRepo)` (or use `bootstrap.ComposeFromEnv()`).
-- `bootstrap.Compose(settingsRepo)` returns a `Root` struct that holds initialized dependencies (logger, servers, clients, repos).
+{compose_guidance}
 - Adapters should be constructed with explicit dependencies (interfaces), not by reaching into globals.
 
 ## HTTP (when present)
@@ -389,9 +510,10 @@ def _write_bootstrap_compose(opt: Options) -> None:
         if opt.http_pprof or opt.http_trace:
             debug_import = '\n\tdebughttp "REPLACE_MODULE/internal/interface/debughttp"'
             debug_field = f"\n\t\tDebugHTTPHandler: debughttp.Handler(debughttp.Options{{Pprof: {str(opt.http_pprof).lower()}, Trace: {str(opt.http_trace).lower()}}}),"
-        _write(
-            _svc(opt.root) / "bootstrap" / "compose.go",
-            """package bootstrap
+        if opt.settings_mode == "config":
+            _write(
+                _svc(opt.root) / "bootstrap" / "compose.go",
+                """package bootstrap
 
 import (
 	"net/http"
@@ -400,9 +522,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/sirupsen/logrus"
 
-	envadapter "REPLACE_MODULE/internal/adapter/env"
-	portout "REPLACE_MODULE/internal/adapter"
-	settingsrepo "REPLACE_MODULE/internal/app/settings"
+	options "REPLACE_MODULE/internal/interface/options"
 	httpadapter "REPLACE_MODULE/internal/interface/http"
 REPLACE_DEBUG_IMPORT
 )
@@ -411,24 +531,24 @@ REPLACE_DEBUG_IMPORT
 // Add databases/clients/etc here and wire them into adapters/use-cases.
 type Root struct {
 	Logger     *logrus.Logger
-	Settings   portout.Settings
-	SettingsRepo portout.SettingsRepository
+	Settings   options.Settings
+	SettingsStore options.Store
 	HTTPServer *echo.Echo
 	HTTPHandler http.Handler
 	DebugHTTPHandler http.Handler
 }
 
-func Compose(settingsRepo portout.SettingsRepository) *Root {
-	settings := portout.Settings{}
-	if settingsRepo != nil {
-		settings = settingsRepo.Get()
+func Compose(settingsStore options.Store) *Root {
+	settings := options.Settings{}
+	if settingsStore != nil {
+		settings = settingsStore.Get()
 	}
 	logger := newLogger(settings.LogLevel)
 	srv := httpadapter.New(logger)
 	return &Root{
 		Logger:     logger,
 		Settings:   settings,
-		SettingsRepo: settingsRepo,
+		SettingsStore: settingsStore,
 		HTTPServer: srv,
 		HTTPHandler: srv,
 REPLACE_DEBUG_FIELD
@@ -436,8 +556,12 @@ REPLACE_DEBUG_FIELD
 }
 
 func ComposeFromEnv() *Root {
-	settingsRepo := settingsrepo.NewRepository(envadapter.Reader{})
-	return Compose(settingsRepo)
+	settingsStore := options.NewRepository(options.EnvLoader{})
+	root := Compose(settingsStore)
+	if err := settingsStore.LastError(); err != nil {
+		root.Logger.WithError(err).Warn("options_load_failed")
+	}
+	return root
 }
 
 func newLogger(logLevel string) *logrus.Logger {
@@ -452,9 +576,167 @@ func newLogger(logLevel string) *logrus.Logger {
 	return l
 }
 """
-            .replace("REPLACE_DEBUG_IMPORT", debug_import)
-            .replace("REPLACE_DEBUG_FIELD", debug_field),
-        )
+                .replace("REPLACE_DEBUG_IMPORT", debug_import)
+                .replace("REPLACE_DEBUG_FIELD", debug_field),
+            )
+        elif opt.settings_mode == "env":
+            _write(
+                _svc(opt.root) / "bootstrap" / "compose.go",
+                """package bootstrap
+
+import (
+	"net/http"
+	"os"
+
+	"github.com/labstack/echo/v4"
+	"github.com/sirupsen/logrus"
+
+	httpadapter "REPLACE_MODULE/internal/interface/http"
+REPLACE_DEBUG_IMPORT
+)
+
+const (
+	envHTTPAddr  = "HTTP_ADDR"
+	envPprofAddr = "PPROF_ADDR"
+	envPprofPort = "PPROF_PORT"
+	envLogLevel  = "LOG_LEVEL"
+)
+
+type Settings struct {
+	HTTPAddr  string
+	PprofAddr string
+	PprofPort string
+	LogLevel  string
+}
+
+// Root is the single composition root for dependency injection.
+// Add databases/clients/etc here and wire them into adapters/use-cases.
+type Root struct {
+	Logger          *logrus.Logger
+	Settings        Settings
+	HTTPServer      *echo.Echo
+	HTTPHandler     http.Handler
+	DebugHTTPHandler http.Handler
+}
+
+func Compose(settings Settings) *Root {
+	logger := newLogger(settings.LogLevel)
+	srv := httpadapter.New(logger)
+	return &Root{
+		Logger:     logger,
+		Settings:   settings,
+		HTTPServer: srv,
+		HTTPHandler: srv,
+REPLACE_DEBUG_FIELD
+	}
+}
+
+func ComposeFromEnv() *Root {
+	return Compose(settingsFromEnv())
+}
+
+func settingsFromEnv() Settings {
+	return Settings{
+		HTTPAddr:  stringOr(envHTTPAddr, ":8080"),
+		PprofAddr: stringOr(envPprofAddr, "127.0.0.1"),
+		PprofPort: os.Getenv(envPprofPort),
+		LogLevel:  os.Getenv(envLogLevel),
+	}
+}
+
+func stringOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
+func newLogger(logLevel string) *logrus.Logger {
+	l := logrus.New()
+	l.SetOutput(os.Stdout)
+	l.SetFormatter(&logrus.JSONFormatter{})
+	if logLevel != "" {
+		if parsed, err := logrus.ParseLevel(logLevel); err == nil {
+			l.SetLevel(parsed)
+		}
+	}
+	return l
+}
+"""
+                .replace("REPLACE_DEBUG_IMPORT", debug_import)
+                .replace("REPLACE_DEBUG_FIELD", debug_field),
+            )
+        else:
+            _write(
+                _svc(opt.root) / "bootstrap" / "compose.go",
+                """package bootstrap
+
+import (
+	"net/http"
+	"os"
+
+	"github.com/labstack/echo/v4"
+	"github.com/sirupsen/logrus"
+
+	httpadapter "REPLACE_MODULE/internal/interface/http"
+REPLACE_DEBUG_IMPORT
+)
+
+type Settings struct {
+	HTTPAddr  string
+	PprofAddr string
+	PprofPort string
+	LogLevel  string
+}
+
+// Root is the single composition root for dependency injection.
+// Add databases/clients/etc here and wire them into adapters/use-cases.
+type Root struct {
+	Logger          *logrus.Logger
+	Settings        Settings
+	HTTPServer      *echo.Echo
+	HTTPHandler     http.Handler
+	DebugHTTPHandler http.Handler
+}
+
+func Compose(settings Settings) *Root {
+	logger := newLogger(settings.LogLevel)
+	srv := httpadapter.New(logger)
+	return &Root{
+		Logger:     logger,
+		Settings:   settings,
+		HTTPServer: srv,
+		HTTPHandler: srv,
+REPLACE_DEBUG_FIELD
+	}
+}
+
+func ComposeFromEnv() *Root {
+	return Compose(defaultSettings())
+}
+
+func defaultSettings() Settings {
+	return Settings{
+		HTTPAddr:  ":8080",
+		PprofAddr: "127.0.0.1",
+	}
+}
+
+func newLogger(logLevel string) *logrus.Logger {
+	l := logrus.New()
+	l.SetOutput(os.Stdout)
+	l.SetFormatter(&logrus.JSONFormatter{})
+	if logLevel != "" {
+		if parsed, err := logrus.ParseLevel(logLevel); err == nil {
+			l.SetLevel(parsed)
+		}
+	}
+	return l
+}
+"""
+                .replace("REPLACE_DEBUG_IMPORT", debug_import)
+                .replace("REPLACE_DEBUG_FIELD", debug_field),
+            )
         return
 
     if "http" in opt.kinds and opt.http_framework == "nethttp":
@@ -463,9 +745,10 @@ func newLogger(logLevel string) *logrus.Logger {
         if opt.http_pprof or opt.http_trace:
             debug_import = '\n\tdebughttp "REPLACE_MODULE/internal/interface/debughttp"'
             debug_field = f"\n\t\tDebugHTTPHandler: debughttp.Handler(debughttp.Options{{Pprof: {str(opt.http_pprof).lower()}, Trace: {str(opt.http_trace).lower()}}}),"
-        _write(
-            _svc(opt.root) / "bootstrap" / "compose.go",
-            """package bootstrap
+        if opt.settings_mode == "config":
+            _write(
+                _svc(opt.root) / "bootstrap" / "compose.go",
+                """package bootstrap
 
 import (
 	"net/http"
@@ -473,9 +756,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	envadapter "REPLACE_MODULE/internal/adapter/env"
-	portout "REPLACE_MODULE/internal/adapter"
-	settingsrepo "REPLACE_MODULE/internal/app/settings"
+	options "REPLACE_MODULE/internal/interface/options"
 	httpadapter "REPLACE_MODULE/internal/interface/http"
 REPLACE_DEBUG_IMPORT
 )
@@ -484,30 +765,34 @@ REPLACE_DEBUG_IMPORT
 // Add databases/clients/etc here and wire them into adapters/use-cases.
 type Root struct {
 	Logger     *logrus.Logger
-	Settings   portout.Settings
-	SettingsRepo portout.SettingsRepository
+	Settings   options.Settings
+	SettingsStore options.Store
 	HTTPHandler http.Handler
 	DebugHTTPHandler http.Handler
 }
 
-func Compose(settingsRepo portout.SettingsRepository) *Root {
-	settings := portout.Settings{}
-	if settingsRepo != nil {
-		settings = settingsRepo.Get()
+func Compose(settingsStore options.Store) *Root {
+	settings := options.Settings{}
+	if settingsStore != nil {
+		settings = settingsStore.Get()
 	}
 	logger := newLogger(settings.LogLevel)
 	return &Root{
 		Logger:      logger,
 		Settings:    settings,
-		SettingsRepo: settingsRepo,
+		SettingsStore: settingsStore,
 		HTTPHandler: httpadapter.Router{Logger: logger}.Handler(),
 REPLACE_DEBUG_FIELD
 	}
 }
 
 func ComposeFromEnv() *Root {
-	settingsRepo := settingsrepo.NewRepository(envadapter.Reader{})
-	return Compose(settingsRepo)
+	settingsStore := options.NewRepository(options.EnvLoader{})
+	root := Compose(settingsStore)
+	if err := settingsStore.LastError(); err != nil {
+		root.Logger.WithError(err).Warn("options_load_failed")
+	}
+	return root
 }
 
 func newLogger(logLevel string) *logrus.Logger {
@@ -522,47 +807,200 @@ func newLogger(logLevel string) *logrus.Logger {
 	return l
 }
 """
-            .replace("REPLACE_DEBUG_IMPORT", debug_import)
-            .replace("REPLACE_DEBUG_FIELD", debug_field),
-        )
+                .replace("REPLACE_DEBUG_IMPORT", debug_import)
+                .replace("REPLACE_DEBUG_FIELD", debug_field),
+            )
+        elif opt.settings_mode == "env":
+            _write(
+                _svc(opt.root) / "bootstrap" / "compose.go",
+                """package bootstrap
+
+import (
+	"net/http"
+	"os"
+
+	"github.com/sirupsen/logrus"
+
+	httpadapter "REPLACE_MODULE/internal/interface/http"
+REPLACE_DEBUG_IMPORT
+)
+
+const (
+	envHTTPAddr  = "HTTP_ADDR"
+	envPprofAddr = "PPROF_ADDR"
+	envPprofPort = "PPROF_PORT"
+	envLogLevel  = "LOG_LEVEL"
+)
+
+type Settings struct {
+	HTTPAddr  string
+	PprofAddr string
+	PprofPort string
+	LogLevel  string
+}
+
+// Root is the single composition root for dependency injection.
+// Add databases/clients/etc here and wire them into adapters/use-cases.
+type Root struct {
+	Logger          *logrus.Logger
+	Settings        Settings
+	HTTPHandler     http.Handler
+	DebugHTTPHandler http.Handler
+}
+
+func Compose(settings Settings) *Root {
+	logger := newLogger(settings.LogLevel)
+	return &Root{
+		Logger:      logger,
+		Settings:    settings,
+		HTTPHandler: httpadapter.Router{Logger: logger}.Handler(),
+REPLACE_DEBUG_FIELD
+	}
+}
+
+func ComposeFromEnv() *Root {
+	return Compose(settingsFromEnv())
+}
+
+func settingsFromEnv() Settings {
+	return Settings{
+		HTTPAddr:  stringOr(envHTTPAddr, ":8080"),
+		PprofAddr: stringOr(envPprofAddr, "127.0.0.1"),
+		PprofPort: os.Getenv(envPprofPort),
+		LogLevel:  os.Getenv(envLogLevel),
+	}
+}
+
+func stringOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
+func newLogger(logLevel string) *logrus.Logger {
+	l := logrus.New()
+	l.SetOutput(os.Stdout)
+	l.SetFormatter(&logrus.JSONFormatter{})
+	if logLevel != "" {
+		if parsed, err := logrus.ParseLevel(logLevel); err == nil {
+			l.SetLevel(parsed)
+		}
+	}
+	return l
+}
+"""
+                .replace("REPLACE_DEBUG_IMPORT", debug_import)
+                .replace("REPLACE_DEBUG_FIELD", debug_field),
+            )
+        else:
+            _write(
+                _svc(opt.root) / "bootstrap" / "compose.go",
+                """package bootstrap
+
+import (
+	"net/http"
+	"os"
+
+	"github.com/sirupsen/logrus"
+
+	httpadapter "REPLACE_MODULE/internal/interface/http"
+REPLACE_DEBUG_IMPORT
+)
+
+type Settings struct {
+	HTTPAddr  string
+	PprofAddr string
+	PprofPort string
+	LogLevel  string
+}
+
+// Root is the single composition root for dependency injection.
+// Add databases/clients/etc here and wire them into adapters/use-cases.
+type Root struct {
+	Logger          *logrus.Logger
+	Settings        Settings
+	HTTPHandler     http.Handler
+	DebugHTTPHandler http.Handler
+}
+
+func Compose(settings Settings) *Root {
+	logger := newLogger(settings.LogLevel)
+	return &Root{
+		Logger:      logger,
+		Settings:    settings,
+		HTTPHandler: httpadapter.Router{Logger: logger}.Handler(),
+REPLACE_DEBUG_FIELD
+	}
+}
+
+func ComposeFromEnv() *Root {
+	return Compose(defaultSettings())
+}
+
+func defaultSettings() Settings {
+	return Settings{
+		HTTPAddr:  ":8080",
+		PprofAddr: "127.0.0.1",
+	}
+}
+
+func newLogger(logLevel string) *logrus.Logger {
+	l := logrus.New()
+	l.SetOutput(os.Stdout)
+	l.SetFormatter(&logrus.JSONFormatter{})
+	if logLevel != "" {
+		if parsed, err := logrus.ParseLevel(logLevel); err == nil {
+			l.SetLevel(parsed)
+		}
+	}
+	return l
+}
+"""
+                .replace("REPLACE_DEBUG_IMPORT", debug_import)
+                .replace("REPLACE_DEBUG_FIELD", debug_field),
+            )
         return
 
-    _write(
-        _svc(opt.root) / "bootstrap" / "compose.go",
-        """package bootstrap
+    if opt.settings_mode == "config":
+        _write(
+            _svc(opt.root) / "bootstrap" / "compose.go",
+            """package bootstrap
 
 import (
 	"os"
 
 	"github.com/sirupsen/logrus"
 
-	envadapter "REPLACE_MODULE/internal/adapter/env"
-	portout "REPLACE_MODULE/internal/adapter"
-	settingsrepo "REPLACE_MODULE/internal/app/settings"
+	options "REPLACE_MODULE/internal/interface/options"
 )
 
 // Root is the single composition root for dependency injection.
 type Root struct {
 	Logger *logrus.Logger
-	Settings   portout.Settings
-	SettingsRepo portout.SettingsRepository
+	Settings   options.Settings
+	SettingsStore options.Store
 }
 
-func Compose(settingsRepo portout.SettingsRepository) *Root {
-	settings := portout.Settings{}
-	if settingsRepo != nil {
-		settings = settingsRepo.Get()
+func Compose(settingsStore options.Store) *Root {
+	settings := options.Settings{}
+	if settingsStore != nil {
+		settings = settingsStore.Get()
 	}
 	return &Root{
 		Logger:       newLogger(settings.LogLevel),
 		Settings:     settings,
-		SettingsRepo: settingsRepo,
+		SettingsStore: settingsStore,
 	}
 }
 
 func ComposeFromEnv() *Root {
-	settingsRepo := settingsrepo.NewRepository(envadapter.Reader{})
-	return Compose(settingsRepo)
+	settingsStore := options.NewRepository(options.EnvLoader{})
+	root := Compose(settingsStore)
+	if err := settingsStore.LastError(); err != nil {
+		root.Logger.WithError(err).Warn("options_load_failed")
+	}
+	return root
 }
 
 func newLogger(logLevel string) *logrus.Logger {
@@ -577,7 +1015,135 @@ func newLogger(logLevel string) *logrus.Logger {
 	return l
 }
 """,
-    )
+        )
+    elif opt.settings_mode == "env":
+        _write(
+            _svc(opt.root) / "bootstrap" / "compose.go",
+            """package bootstrap
+
+import (
+	"os"
+
+	"github.com/sirupsen/logrus"
+)
+
+const (
+	envHTTPAddr  = "HTTP_ADDR"
+	envPprofAddr = "PPROF_ADDR"
+	envPprofPort = "PPROF_PORT"
+	envLogLevel  = "LOG_LEVEL"
+)
+
+// Settings holds optional runtime configuration without a settings package.
+type Settings struct {
+	HTTPAddr  string
+	PprofAddr string
+	PprofPort string
+	LogLevel  string
+}
+
+// Root is the single composition root for dependency injection.
+type Root struct {
+	Logger   *logrus.Logger
+	Settings Settings
+}
+
+func Compose(settings Settings) *Root {
+	return &Root{
+		Logger:   newLogger(settings.LogLevel),
+		Settings: settings,
+	}
+}
+
+func ComposeFromEnv() *Root {
+	return Compose(settingsFromEnv())
+}
+
+func settingsFromEnv() Settings {
+	return Settings{
+		HTTPAddr:  stringOr(envHTTPAddr, ":8080"),
+		PprofAddr: stringOr(envPprofAddr, "127.0.0.1"),
+		PprofPort: os.Getenv(envPprofPort),
+		LogLevel:  os.Getenv(envLogLevel),
+	}
+}
+
+func stringOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
+func newLogger(logLevel string) *logrus.Logger {
+	l := logrus.New()
+	l.SetOutput(os.Stdout)
+	l.SetFormatter(&logrus.JSONFormatter{})
+	if logLevel != "" {
+		if parsed, err := logrus.ParseLevel(logLevel); err == nil {
+			l.SetLevel(parsed)
+		}
+	}
+	return l
+}
+""",
+        )
+    else:
+        _write(
+            _svc(opt.root) / "bootstrap" / "compose.go",
+            """package bootstrap
+
+import (
+	"os"
+
+	"github.com/sirupsen/logrus"
+)
+
+// Settings holds optional runtime configuration without env/config settings.
+type Settings struct {
+	HTTPAddr  string
+	PprofAddr string
+	PprofPort string
+	LogLevel  string
+}
+
+// Root is the single composition root for dependency injection.
+type Root struct {
+	Logger   *logrus.Logger
+	Settings Settings
+}
+
+func Compose(settings Settings) *Root {
+	return &Root{
+		Logger:   newLogger(settings.LogLevel),
+		Settings: settings,
+	}
+}
+
+func ComposeFromEnv() *Root {
+	return Compose(defaultSettings())
+}
+
+func defaultSettings() Settings {
+	return Settings{
+		HTTPAddr:  ":8080",
+		PprofAddr: "127.0.0.1",
+	}
+}
+
+func newLogger(logLevel string) *logrus.Logger {
+	l := logrus.New()
+	l.SetOutput(os.Stdout)
+	l.SetFormatter(&logrus.JSONFormatter{})
+	if logLevel != "" {
+		if parsed, err := logrus.ParseLevel(logLevel); err == nil {
+			l.SetLevel(parsed)
+		}
+	}
+	return l
+}
+""",
+        )
 
 
 def _write_http_debug_pprof(opt: Options) -> None:
@@ -1111,6 +1677,17 @@ def parse_args() -> Options:
         help="Include HTTP debug handler for trace on /debug/pprof/trace (opt-in; only for --kinds http).",
     )
     parser.add_argument(
+        "--settings",
+        choices=["none", "env", "config"],
+        default="env",
+        help="Settings mode: none (no env/config), env (env only), config (env + optional config file via Koanf; env overrides config).",
+    )
+    parser.add_argument(
+        "--with-settings",
+        action="store_true",
+        help="Deprecated: use --settings=config instead.",
+    )
+    parser.add_argument(
         "--skip-deps",
         action="store_true",
         help="Skip dependency install (do not run `go mod tidy` even if go.mod is created).",
@@ -1120,6 +1697,12 @@ def parse_args() -> Options:
     root = Path(args.root).expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
     kinds = tuple(k.strip() for k in args.kinds.split(",") if k.strip())
+    settings_mode = args.settings
+    if args.with_settings:
+        if settings_mode != "env":
+            raise SystemExit("Use either --with-settings or --settings; not both.")
+        settings_mode = "config"
+
     return Options(
         root=root,
         module=args.module,
@@ -1128,6 +1711,7 @@ def parse_args() -> Options:
         http_framework=args.http_framework,
         http_pprof=args.http_pprof,
         http_trace=args.http_trace,
+        settings_mode=settings_mode,
         skip_deps=args.skip_deps,
     )
 
