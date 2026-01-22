@@ -9,3 +9,5 @@ Use these files as needed; do not load everything by default.
 - `references/layout-worker.md`: Worker/consumer/scheduler layout (queues, cron, jobs)
 - `references/layout-cli.md`: CLI/tooling layout (cobra-style without assuming deps)
 - `references/architecture-rules.md`: Dependency rules and package boundary checklist
+- `references/refactor-workflow.md`: Step-by-step refactor workflow for existing Go projects
+- `references/refactor-plan-template.md`: Plan template for user-approved refactors

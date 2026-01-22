@@ -31,6 +31,12 @@ description: Define, review, and scaffold Go service directory structures using 
 
 Use `references/architecture-rules.md` as the dependency rulebook.
 
+### 4) Refactor an existing project
+
+- Read `references/refactor-workflow.md`.
+- Create a refactor plan using `references/refactor-plan-template.md` and agree on it with the user before making changes.
+- Execute the plan in small, explicit steps and confirm after each step.
+
 ## Scaffolding
 
 Run the scaffolder to generate a starting tree plus minimal compileable stubs:
