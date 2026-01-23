@@ -25,13 +25,15 @@ Use this workflow to refactor any Go project into the hexagonal layout in small,
 ## 3) Create a refactor plan
 
 - Use `references/refactor-plan-template.md`.
+- Identify minimal characterization tests to lock behavior before moving code. See `references/refactor-testing.md`.
+- Create a checkboxed `REFACTORING.md` at repo root; this file is the live plan and status tracker.
 - Keep steps small and reversible.
 - Require explicit user approval before any code changes.
 
 ## 4) Execute in small steps
 
 - Follow the plan step-by-step.
-- After each step: update imports, build or run targeted tests, and ask for confirmation.
+- After each step: update imports, build or run targeted tests, mark the related checkbox complete in `REFACTORING.md`, and ask for confirmation.
 - If a step expands in scope, split it and re-confirm.
 
 ## 5) Final verification

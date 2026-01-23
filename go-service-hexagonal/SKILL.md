@@ -34,8 +34,10 @@ Use `references/architecture-rules.md` as the dependency rulebook.
 ### 4) Refactor an existing project
 
 - Read `references/refactor-workflow.md`.
+- For minimal, necessary tests during refactors, read `references/refactor-testing.md`.
 - Create a refactor plan using `references/refactor-plan-template.md` and agree on it with the user before making changes.
 - Execute the plan in small, explicit steps and confirm after each step.
+- Track the plan in a checkboxed `REFACTORING.md` at repo root and mark completed items as you finish them.
 
 ## Scaffolding
 

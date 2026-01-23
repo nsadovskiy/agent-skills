@@ -10,4 +10,6 @@ Use these files as needed; do not load everything by default.
 - `references/layout-cli.md`: CLI/tooling layout (cobra-style without assuming deps)
 - `references/architecture-rules.md`: Dependency rules and package boundary checklist
 - `references/refactor-workflow.md`: Step-by-step refactor workflow for existing Go projects
+- Refactor plans should be tracked in a checkboxed `REFACTORING.md` at repo root (see refactor workflow).
+- `references/refactor-testing.md`: Minimal, necessary testing guidance during refactors
 - `references/refactor-plan-template.md`: Plan template for user-approved refactors

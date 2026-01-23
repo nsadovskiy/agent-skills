@@ -1,6 +1,6 @@
 # Refactor Plan Template
 
-Copy this template, fill it in, and get user approval before making any changes.
+Copy this template into `REFACTORING.md` at the repo root, fill it in with checkboxes, and get user approval before making any changes.
 
 ## Context
 
@@ -22,6 +22,11 @@ Copy this template, fill it in, and get user approval before making any changes.
 | --- | --- | --- | --- |
 | `<path>` | `internal/domain/...` | `<why>` | `<imports/tests>` |
 
+## Minimal tests to add
+
+- `<entrypoint or use case>`: `<test description>`
+- `<entrypoint or use case>`: `<test description>`
+
 ## Refactor steps
 
 For each step, keep scope small and confirm before moving on.
@@ -31,6 +36,7 @@ For each step, keep scope small and confirm before moving on.
 - Change: `<move/rename/create/delete>`
 - Files: `<paths>`
 - Import updates: `<packages affected>`
+- Tests to add: `<new or updated tests>`
 - Build/test: `<command(s)>`
 - Confirmation: `Ask user to approve before next step`
 
@@ -39,5 +45,6 @@ For each step, keep scope small and confirm before moving on.
 - Change: `<move/rename/create/delete>`
 - Files: `<paths>`
 - Import updates: `<packages affected>`
+- Tests to add: `<new or updated tests>`
 - Build/test: `<command(s)>`
 - Confirmation: `Ask user to approve before next step`
